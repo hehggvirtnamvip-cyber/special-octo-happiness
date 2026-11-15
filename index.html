@@ -565,6 +565,7 @@ let currentToken = null;
 let predTimer = null;
 let isSpinning = false;
 let lastPhien = null;
+let retryCount = 0; // Biến đếm số lần thử lại khi lỗi
 const REFRESH_MS = 6000; 
 
 function logout() {
@@ -600,6 +601,7 @@ function renderGames() {
 
 function backToKho() {
   clearInterval(predTimer);
+  retryCount = 0;
   $('viewTool').classList.remove('active');
   $('viewKho').classList.add('active');
 }
@@ -609,13 +611,17 @@ function openTool(token, name) {
   currentToken = token;
   lastPhien = null;
   isSpinning = false;
+  retryCount = 0;
   
   $('toolTitle').textContent = name;
   
   // Reset UI
   $('toolPredText').textContent = '--';
   $('toolPredText').className = 'pred-text';
+  $('toolPredText').style.color = ''; 
+  $('toolPredText').style.fontSize = '';
   $('toolRateText').textContent = '--%';
+  $('toolRateText').style.color = '';
   $('toolCircle').style.strokeDashoffset = 785;
   $('toolCircleSvg').style.transform = 'rotate(-90deg)'; 
   $('historyBody').innerHTML = '';
@@ -649,6 +655,9 @@ async function fetchPrediction(isFirst) {
         throw new Error(d.error);
     }
     
+    // Nếu thành công, reset lại số lần thử lại
+    retryCount = 0;
+
     if (lastPhien !== null && d.phien !== lastPhien) {
       isSpinning = true;
       startSpin();
@@ -661,6 +670,37 @@ async function fetchPrediction(isFirst) {
     }
     lastPhien = d.phien;
   } catch(e) {
+    // XỬ LÝ KHI BỊ LỖI (Token hết hạn, mạng đứt, hoặc Crack)
+    console.log("Lỗi API:", e.message);
+    
+    if (retryCount < 3) {
+        // Thử tự động lấy lại danh sách game (token mới) nếu bị lỗi
+        retryCount++;
+        console.log(`Thử lại lần ${retryCount}...`);
+        
+        $('toolPredText').textContent = 'ĐANG KẾT NỐI LẠI...';
+        $('toolPredText').style.fontSize = '1.5rem';
+        
+        try {
+            // Lấy token mới
+            const rg = await fetch('/api/games');
+            const dataG = await rg.json();
+            if (dataG.games && dataG.games.length > 0) {
+                // Tìm game hiện tại để lấy token mới
+                const cfg = dataG.games.find(g => g.name === $('toolTitle').textContent);
+                if (cfg) {
+                    currentToken = cfg.token;
+                    console.log("Đã lấy token mới:", currentToken);
+                }
+            }
+        } catch (errG) {}
+        
+        // Đợi 2 giây rồi gọi lại API
+        setTimeout(() => fetchPrediction(false), 2000);
+        return;
+    }
+
+    // Nếu thử lại 3 lần vẫn lỗi thì hiện chữ Lỗi
     $('toolPredText').textContent = 'LỖI';
     $('toolRateText').textContent = 'KHÔNG CÓ SERVER';
     $('toolPredText').className = 'pred-text';
@@ -711,6 +751,10 @@ function renderTool(d) {
 
   let pred = d.du_doan || '--';
   let conf = d.tin_cay || 0;
+
+  // Reset lại style nếu trước đó bị lỗi
+  predText.style.color = '';
+  predText.style.fontSize = '';
 
   circle.style.transition = 'stroke-dashoffset 1s ease-in-out';
   predText.textContent = pred;
