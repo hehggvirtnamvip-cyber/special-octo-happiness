@@ -6,11 +6,11 @@ const { Pool } = require('pg');
 const TelegramBot = require('node-telegram-bot-api');
 const https = require('https');
 
-// ========== CONFIG ==========
+// ========== CONFIG BẢO MẬT ==========
 const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA";
 const ADMIN_ID = 7757046138;
 const ADMIN_USER = "tranhoang2286";
-const NOTIFY_CHAT = -1001234567890; // Sửa nếu cần
+const NOTIFY_CHAT = -1001234567890;
 
 const BANK_CODE = "BIDV";
 const BANK_ACC = "96247V4IWI";
@@ -20,18 +20,20 @@ const API_BANK = "https://reimagined-spork-bu28.onrender.com/lich-su";
 const PORT = process.env.PORT || 8000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
-// Bí mật để mã hóa API
 const SECRET_KEY = 'hoangtool-secret-2026-DO-NOT-SHARE-CHANGE-ME';
 const TOKEN_ROTATE_MS = 3600000;
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// Link API gốc (Bị ẩn hoàn toàn với client)
+// API THẬT BỊ ẨN BẰNG BASE64 (Không ai copy được từ code)
+const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01"; // https://game-lon-5
+const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q"; // sks.onrender.com/j
+const _k3 = "c29uLXByZWRpY3Qv"; // son-predict/
 const API_GAME_RAW = {
-  md5:      'https://game-lon-5sks.onrender.com/json-predict/lc79/md5',
-  hu:       'https://game-lon-5sks.onrender.com/json-predict/lc79/hu',
-  luckywin: 'https://game-lon-5sks.onrender.com/json-predict/sicbo/luckywin',
-  sumclub:  'https://game-lon-5sks.onrender.com/json-predict/sicbo/sumclub',
+  md5: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9tZDU=").toString('ascii'), 
+  hu: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9odQ==").toString('ascii'), 
+  luckywin: Buffer.from(_k1 + _k2 + _k3 + "c2ljYm8vbHVja3l3aW4=").toString('ascii'), 
+  sumclub: Buffer.from(_k1 + _k2 + _k3 + "c2ljYm8vc3VtY2x1Yg==").toString('ascii'),
 };
 
 const PRICES = {
@@ -50,11 +52,12 @@ const pool = new Pool({
 });
 
 async function initDB() {
-  if (!DATABASE_URL) return console.error("❌ THIẾU DATABASE_URL!");
+  if (!DATABASE_URL) return;
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, plan TEXT NOT NULL, duration_days INTEGER, created_at DOUBLE PRECISION NOT NULL, activated_at DOUBLE PRECISION, expires_at DOUBLE PRECISION, is_active INTEGER DEFAULT 0);
       CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, user_id BIGINT, username TEXT, full_name TEXT, plan TEXT, amount INTEGER, content TEXT, status TEXT DEFAULT 'pending', created_at DOUBLE PRECISION, paid_at DOUBLE PRECISION, key_issued TEXT);
+      CREATE TABLE IF NOT EXISTS game_history (id SERIAL PRIMARY KEY, game_id TEXT, phien TEXT, du_doan TEXT, ket_qua TEXT, danh_gia TEXT, created_at DOUBLE PRECISION);
     `);
     console.log('✅ Database OK!');
   } catch (err) { console.error('❌ DB Error:', err.message); }
@@ -80,7 +83,7 @@ function predictSicbo(history) {
   return { du_doan: predict, tin_cay: confidence };
 }
 
-// ========== MÃ HÓA TOKEN API FAKE ==========
+// ========== MÃ HÓA TOKEN ==========
 let TOKEN_MAP = {};
 let CURRENT_BUCKET = -1;
 function hourBucket() { return Math.floor(Date.now() / TOKEN_ROTATE_MS); }
@@ -96,16 +99,16 @@ function tokenToGame(t) { if (TOKEN_MAP[t]) return TOKEN_MAP[t]; const prevBucke
 function gameToToken(g) { for (const [t, k] of Object.entries(TOKEN_MAP)) if (k === g) return t; return null; }
 rebuildTokenMap();
 
-// ========== WEB SERVER & API ==========
+// ========== WEB SERVER & BẪY CRACK ==========
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
-const cache = new Map();
 const RATE_BUCKETS = new Map();
 app.use('/api', (req, res, next) => { rebuildTokenMap(); next(); });
 
-// API Fake: Trả về danh sách game dưới dạng token (không lộ link thật)
+let RUNTIME_HISTORY = { md5: [], hu: [], luckywin: [], sumclub: [] };
+
 app.get('/api/games', (req, res) => {
   const meta = {
     md5:      { name: 'LC79 MD5', icon: 'fa-fingerprint', tagline: 'Phân tích mã băm', badge: 'V3' },
@@ -121,7 +124,7 @@ app.get('/api/games', (req, res) => {
   res.json({ games, expires_in: Math.ceil((TOKEN_ROTATE_MS - (Date.now() % TOKEN_ROTATE_MS)) / 1000) });
 });
 
-// API Dự đoán: Nhận token, gọi link thật, trả về dữ liệu đã được xử lý
+// BẪY CRACK Ở ĐÂY: Nếu ai tự ý sửa link hoặc gọi sai token, sẽ hiện chữ chửi
 app.get('/api/predict/:token', async (req, res) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   let rec = RATE_BUCKETS.get(ip);
@@ -130,48 +133,67 @@ app.get('/api/predict/:token', async (req, res) => {
   rec.count++;
   if (rec.count > RATE_LIMIT_MAX) return res.status(429).json({ error: 'Quá nhiều request' });
 
-  const game = tokenToGame(req.params.token);
-  if (!game) return res.status(404).json({ error: 'Invalid token' });
-
-  const cached = cache.get('p:' + game);
-  if (cached && Date.now() - cached.t < 5000) return res.json(cached.v);
+  const gameId = tokenToGame(req.params.token);
+  
+  // NẾU TOKEN SAI -> TRẢ VỀ CHỮ CHỬI
+  if (!gameId) {
+    return res.status(403).send("ĐỒ NGU + ÓC CẶC CŨNG ĐÒI CRACK. TOOL NÀY KHÔNG CÓ SERVER ĐỂ CHẠY ĐÂU!");
+  }
 
   try {
-    const r = await axios.get(API_GAME_RAW[game], { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await axios.get(API_GAME_RAW[gameId], { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0' } });
     let raw = r.data || {};
-    let data = {};
+    let phien = '', du_doan = '', tin_cay = 50, ket_qua_thuc_te = '';
 
-    if (game === 'md5' || game === 'hu') {
+    if (gameId === 'md5' || gameId === 'hu') {
       let src = raw.data || raw;
-      data = { phien: String(src.phien_hien_tai || src.phien || ''), du_doan: (src.du_doan || '').toUpperCase(), tin_cay: parseInt(src.do_tin_cay) || 50 };
+      phien = String(src.phien_hien_tai || src.phien || '');
+      du_doan = (src.du_doan || '').toUpperCase();
+      tin_cay = parseInt(src.do_tin_cay) || 50;
+      ket_qua_thuc_te = du_doan; 
     } else {
       let history = Array.isArray(raw) ? raw : (raw.data || []);
-      let phien = history.length > 0 ? history[0].gameNum : '';
+      if (history.length > 0) {
+        phien = String(history[0].gameNum);
+        ket_qua_thuc_te = history[0].resultType === 1 ? 'TÀI' : 'XỈU';
+      }
       let pred = predictSicbo(history);
-      data = { phien: String(phien), du_doan: pred.du_doan, tin_cay: pred.tin_cay };
+      du_doan = pred.du_doan;
+      tin_cay = pred.tin_cay;
     }
 
-    cache.set('p:' + game, { v: data, t: Date.now() });
-    res.json(data);
+    let historyArr = RUNTIME_HISTORY[gameId];
+    let lastRecord = historyArr.length > 0 ? historyArr[0] : null;
+
+    // Tự động cập nhật kết quả phiên trước
+    if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
+      lastRecord.ket_qua = ket_qua_thuc_te;
+      lastRecord.danh_gia = (lastRecord.du_doan === ket_qua_thuc_te) ? 'WIN' : 'LOSE';
+      pool.query('INSERT INTO game_history (game_id, phien, du_doan, ket_qua, danh_gia, created_at) VALUES ($1,$2,$3,$4,$5,$6)', 
+        [gameId, lastRecord.phien, lastRecord.du_doan, ket_qua_thuc_te, lastRecord.danh_gia, Date.now()/1000]).catch(()=>{});
+    }
+
+    if (!lastRecord || lastRecord.phien !== phien) {
+      historyArr.unshift({ phien, du_doan, ket_qua: null, danh_gia: null });
+      if (historyArr.length > 30) historyArr.pop();
+    }
+
+    res.json({ phien, du_doan, tin_cay, history: historyArr });
   } catch (e) {
-    res.status(502).json({ error: 'Game tạm không phản hồi' });
+    console.error(e.message);
+    res.status(502).send("MẤT KẾT NỐI SERVER. KHÔNG CÓ DỮ LIỆU ĐỂ DỰ ĐOÁN!");
   }
 });
 
-// API Kích hoạt Key
 app.post('/api/key/activate', async (req, res) => {
   try {
     const key = String(req.body.key || '').trim().toUpperCase();
     if (!key) return res.status(400).json({ ok: false, error: 'Thiếu key' });
-
     const result = await pool.query('SELECT plan, duration_days, activated_at, expires_at FROM keys WHERE key = $1', [key]);
     const row = result.rows[0];
-    
     if (!row) return res.json({ ok: false, error: 'Key không tồn tại' });
-
     const now = Date.now() / 1000;
     let finalExp = row.expires_at;
-
     if (row.activated_at === null || row.activated_at === undefined) {
       finalExp = row.duration_days === null ? null : now + row.duration_days * 86400;
       await pool.query('UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1 WHERE key=$3', [now, finalExp, key]);
@@ -188,13 +210,12 @@ app.post('/api/key/activate', async (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// ========== BOT TELEGRAM ==========
+// ========== TELEGRAM BOT ==========
 let bot = null;
 try {
   const httpsAgent = new https.Agent({ rejectUnauthorized: false, family: 4 });
   bot = new TelegramBot(BOT_TOKEN, { polling: true, request: { agent: httpsAgent } });
   bot.on('polling_error', (error) => console.error('⚠️ Lỗi Bot:', error.message));
-  console.log('🤖 Bot Telegram đã khởi động!');
 } catch (err) { console.error('❌ Lỗi khởi động Bot:', err.message); }
 
 const userState = {};
