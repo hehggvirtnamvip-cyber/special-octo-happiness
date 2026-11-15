@@ -4,12 +4,14 @@ const crypto = require('crypto');
 const path = require('path');
 const { Pool } = require('pg');
 const TelegramBot = require('node-telegram-bot-api');
+const https = require('https');
 
 // ========== CONFIG ==========
-const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAFvUZv0V4gY57dU5-4HZu6SgqnQfcMcFc4";
+// ĐÃ THAY TOKEN MỚI CỦA BẠN
+const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA";
 const ADMIN_ID = 7757046138;
 const ADMIN_USER = "tranhoang2286";
-const NOTIFY_CHAT = -1001234567890;
+const NOTIFY_CHAT = -1001234567890; // Sửa ID nhóm nếu cần
 
 const BANK_CODE = "BIDV";
 const BANK_ACC = "96247V4IWI";
@@ -17,6 +19,7 @@ const BANK_HOLDER = "TRAN NHAT HOANG";
 
 const API_BANK = "https://reimagined-spork-bu28.onrender.com/lich-su";
 const PORT = process.env.PORT || 8000;
+
 const DATABASE_URL = process.env.DATABASE_URL;
 
 const SECRET_KEY = 'hoangtool-secret-2026-DO-NOT-SHARE-CHANGE-ME';
@@ -43,7 +46,6 @@ const PRICES = {
 // ========== DATABASE SETUP ==========
 if (!DATABASE_URL) {
   console.error("❌ LỖI: Chưa có biến môi trường DATABASE_URL trên Render!");
-  console.error("👉 Hãy vào Tab Environment của Web Service và thêm DATABASE_URL (Copy từ PostgreSQL Internal URL).");
 }
 
 const pool = new Pool({
@@ -73,7 +75,7 @@ async function initDB() {
 }
 initDB();
 
-// ========== TOKEN MAP (BẢO MẬT API) ==========
+// ========== TOKEN MAP ==========
 let TOKEN_MAP = {};
 let CURRENT_BUCKET = -1;
 
@@ -199,15 +201,24 @@ app.post('/api/key/activate', async (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// ========== TELEGRAM BOT (CHỐNG CRASH) ==========
+// ========== TELEGRAM BOT (FIX LỖI TLS/SSL) ==========
 let bot = null;
 try {
-  bot = new TelegramBot(BOT_TOKEN, { polling: true });
+  // Tạo Agent bỏ qua kiểm tra SSL và ép dùng IPv4 (Tránh lỗi TLSWrap trên Render)
+  const httpsAgent = new https.Agent({  
+    rejectUnauthorized: false,
+    family: 4 
+  });
+
+  bot = new TelegramBot(BOT_TOKEN, { 
+    polling: true,
+    request: { agent: httpsAgent } // Truyền Agent vào cấu hình request
+  });
+
   bot.on('polling_error', (error) => {
     console.error('⚠️ Lỗi Polling (Bot có thể đang chạy ở nơi khác):', error.message);
-    // Không throw error, để Web Server tiếp tục chạy
   });
-  console.log('🤖 Bot Telegram đã khởi động!');
+  console.log('🤖 Bot Telegram đã khởi động với Token mới!');
 } catch (err) {
   console.error('❌ Không thể khởi động Bot Telegram:', err.message);
 }
