@@ -588,7 +588,6 @@ async function activateKey(){
   
   showToast('Đang kiểm tra key...');
   
-  // Thêm Timeout 5 giây để chống đơ
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);
 
@@ -604,6 +603,7 @@ async function activateKey(){
     const data = await r.json();
     if (!data.ok) return showToast('❌ ' + (data.error || 'Thất bại'), 4000);
     
+    // ÉP LƯU DỮ LIỆU CHÍNH XÁC
     localStorage.setItem('hoangtool_key', key);
     if (data.expires_at === null || data.expires_at === undefined) {
         localStorage.setItem('hoangtool_expires', 'null');
@@ -617,11 +617,11 @@ async function activateKey(){
       showToast('ℹ️ Key đã kích hoạt trước đó', 3000);
     }
     
-    // TỰ ĐỘNG CHUYỂN HƯỚNG QUA KHO TOOL
+    // CẬP NHẬT GIAO DIỆN NGAY LẬP TỨC
+    document.getElementById('viewKho').classList.add('key-active');
     setTimeout(() => {
-        checkAuthView();
         document.getElementById('games').scrollIntoView({behavior:'smooth'});
-    }, 1000);
+    }, 500);
 
   } catch(e){ 
     if (e.name === 'AbortError') {
@@ -646,6 +646,7 @@ function switchView(id){
 }
 
 async function playGame(token){
+  // KIỂM TRA CỰC KỲ CHẶT CHẼ
   const savedKey = localStorage.getItem('hoangtool_key');
   const expiresAt = localStorage.getItem('hoangtool_expires');
   
