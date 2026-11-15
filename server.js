@@ -9,7 +9,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAFvUZv0V4gY57dU5-4HZu6SgqnQfcMcFc4";
 const ADMIN_ID = 7757046138;
 const ADMIN_USER = "tranhoang2286";
-const NOTIFY_CHAT = -1001234567890; // Sửa ID nhóm nếu cần
+const NOTIFY_CHAT = -1001234567890;
 
 const BANK_CODE = "BIDV";
 const BANK_ACC = "96247V4IWI";
@@ -17,8 +17,6 @@ const BANK_HOLDER = "TRAN NHAT HOANG";
 
 const API_BANK = "https://reimagined-spork-bu28.onrender.com/lich-su";
 const PORT = process.env.PORT || 8000;
-
-// Lấy chuỗi kết nối từ Render env
 const DATABASE_URL = process.env.DATABASE_URL;
 
 const SECRET_KEY = 'hoangtool-secret-2026-DO-NOT-SHARE-CHANGE-ME';
@@ -26,7 +24,6 @@ const TOKEN_ROTATE_MS = 3600000;
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// Ẩn API Gốc - Chỉ có server biết
 const API_GAME_RAW = {
   md5:      'https://game-lon-5sks.onrender.com/json-predict/lc79/md5',
   hu:       'https://game-lon-5sks.onrender.com/json-predict/lc79/hu',
@@ -46,11 +43,12 @@ const PRICES = {
 // ========== DATABASE SETUP ==========
 if (!DATABASE_URL) {
   console.error("❌ LỖI: Chưa có biến môi trường DATABASE_URL trên Render!");
+  console.error("👉 Hãy vào Tab Environment của Web Service và thêm DATABASE_URL (Copy từ PostgreSQL Internal URL).");
 }
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: DATABASE_URL ? { rejectUnauthorized: false } : false // Bắt buộc cho Render
+  ssl: DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
 async function initDB() {
@@ -114,7 +112,6 @@ const RATE_BUCKETS = new Map();
 
 app.use('/api', (req, res, next) => { rebuildTokenMap(); next(); });
 
-// Trả về token ngẫu nhiên, KHÔNG trả về link API
 app.get('/api/games', (req, res) => {
   const meta = {
     md5:      { name: 'LC79 MD5', icon: 'fa-fingerprint', tagline: 'Tool MD5 — Phân tích mã băm', badge: 'V3' },
@@ -131,7 +128,6 @@ app.get('/api/games', (req, res) => {
   res.json({ games, expires_in });
 });
 
-// Proxy API - Client gọi token, Server tự động gọi API thật (ẩn đi)
 app.get('/api/predict/:token', async (req, res) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   let rec = RATE_BUCKETS.get(ip);
@@ -150,7 +146,6 @@ app.get('/api/predict/:token', async (req, res) => {
   if (cached && Date.now() - cached.t < 5000) return res.json(cached.v);
 
   try {
-    // SERVER GỌI API THẬT
     const r = await axios.get(API_GAME_RAW[game], { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0' } });
     let raw = r.data || {};
     let src = raw;
@@ -204,13 +199,17 @@ app.post('/api/key/activate', async (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// ========== TELEGRAM BOT ==========
-let bot;
+// ========== TELEGRAM BOT (CHỐNG CRASH) ==========
+let bot = null;
 try {
   bot = new TelegramBot(BOT_TOKEN, { polling: true });
+  bot.on('polling_error', (error) => {
+    console.error('⚠️ Lỗi Polling (Bot có thể đang chạy ở nơi khác):', error.message);
+    // Không throw error, để Web Server tiếp tục chạy
+  });
   console.log('🤖 Bot Telegram đã khởi động!');
 } catch (err) {
-  console.error('❌ Lỗi khởi động Bot (Có thể do trùng Token):', err.message);
+  console.error('❌ Không thể khởi động Bot Telegram:', err.message);
 }
 
 const userState = {};
