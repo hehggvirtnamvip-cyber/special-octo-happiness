@@ -7,11 +7,10 @@ const TelegramBot = require('node-telegram-bot-api');
 const https = require('https');
 
 // ========== CONFIG ==========
-// ĐÃ THAY TOKEN MỚI CỦA BẠN
 const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA";
 const ADMIN_ID = 7757046138;
 const ADMIN_USER = "tranhoang2286";
-const NOTIFY_CHAT = -1001234567890; // Sửa ID nhóm nếu cần
+const NOTIFY_CHAT = -1001234567890;
 
 const BANK_CODE = "BIDV";
 const BANK_ACC = "96247V4IWI";
@@ -19,7 +18,6 @@ const BANK_HOLDER = "TRAN NHAT HOANG";
 
 const API_BANK = "https://reimagined-spork-bu28.onrender.com/lich-su";
 const PORT = process.env.PORT || 8000;
-
 const DATABASE_URL = process.env.DATABASE_URL;
 
 const SECRET_KEY = 'hoangtool-secret-2026-DO-NOT-SHARE-CHANGE-ME';
@@ -46,6 +44,7 @@ const PRICES = {
 // ========== DATABASE SETUP ==========
 if (!DATABASE_URL) {
   console.error("❌ LỖI: Chưa có biến môi trường DATABASE_URL trên Render!");
+  console.error("👉 Hãy vào Tab Environment của Web Service và thêm DATABASE_URL.");
 }
 
 const pool = new Pool({
@@ -201,10 +200,9 @@ app.post('/api/key/activate', async (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// ========== TELEGRAM BOT (FIX LỖI TLS/SSL) ==========
+// ========== TELEGRAM BOT (FIX LỖI & CHỐNG CRASH) ==========
 let bot = null;
 try {
-  // Tạo Agent bỏ qua kiểm tra SSL và ép dùng IPv4 (Tránh lỗi TLSWrap trên Render)
   const httpsAgent = new https.Agent({  
     rejectUnauthorized: false,
     family: 4 
@@ -212,13 +210,14 @@ try {
 
   bot = new TelegramBot(BOT_TOKEN, { 
     polling: true,
-    request: { agent: httpsAgent } // Truyền Agent vào cấu hình request
+    request: { agent: httpsAgent }
   });
 
   bot.on('polling_error', (error) => {
     console.error('⚠️ Lỗi Polling (Bot có thể đang chạy ở nơi khác):', error.message);
+    // Không throw error, để Web Server tiếp tục chạy
   });
-  console.log('🤖 Bot Telegram đã khởi động với Token mới!');
+  console.log('🤖 Bot Telegram đã khởi động!');
 } catch (err) {
   console.error('❌ Không thể khởi động Bot Telegram:', err.message);
 }
@@ -245,7 +244,7 @@ async function showStart(chatId, user) {
       ]
     }
   };
-  await bot.sendMessage(chatId, `🦁 <b>HOÀNG TOOL</b>\nChào <b>${user.first_name}</b>!\n\n💰 <b>BẢNG GIÁ KEY</b>\n• 20k → 1 ngày\n• 30k → 4 ngày\n• 60k → 1 tuần\n• 120k → 1 tháng\n• 150k → 3 tháng\n• 220k → Vĩnh viễn\n\n👇 Chọn thao tác`, opts);
+  await bot.sendMessage(chatId, `🦁 <b>HOÀNG TOOL</b>\nChào <b>${user.first_name}</b>!\n\n💰 <b>BẢNG GIÁ KEY</b>\n• 20k → 1 ngày\n• 30k → 4 ngày\n• 60k → 1 tuần\n• 120k → 1 tháng\n• 150k → 3 tháng\n• 220k → Vĩnh viễn\n\n👇 Chọn thao tác`, opts).catch(e => console.error("Lỗi gửi tin nhắn start:", e.message));
 }
 
 if (bot) {
@@ -264,7 +263,7 @@ if (bot) {
     else if (data === 'buy_menu') {
       const keys = Object.entries(PRICES).map(([pid, cfg]) => [{ text: `💎 ${cfg.label} — ${cfg.price.toLocaleString('vi-VN')}đ`, callback_data: `buy_${pid}` }]);
       keys.push([{ text: '🔙 Quay lại', callback_data: 'back_start' }]);
-      bot.editMessageText('🛒 <b>Chọn gói key:</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keys } });
+      bot.editMessageText('🛒 <b>Chọn gói key:</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keys } }).catch(e => console.error("Lỗi editMessage:", e.message));
     } 
     else if (data.startsWith('buy_')) {
       const plan = data.replace('buy_', '');
@@ -272,16 +271,16 @@ if (bot) {
       if (!cfg) return;
       const orderId = crypto.randomBytes(4).toString('hex').toUpperCase();
       const content = `HT${orderId}`;
-      await pool.query('INSERT INTO orders (id, user_id, username, full_name, plan, amount, content, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [orderId, user.id, user.username || '', user.first_name || '', plan, cfg.price, content, Date.now() / 1000]);
+      await pool.query('INSERT INTO orders (id, user_id, username, full_name, plan, amount, content, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [orderId, user.id, user.username || '', user.first_name || '', plan, cfg.price, content, Date.now() / 1000]).catch(e => console.error("Lỗi insert order:", e.message));
       
       const qrUrl = `https://vietqr.app/img?bank=${BANK_CODE}&acc=${BANK_ACC}&amount=${cfg.price}&addInfo=${content}&template=compact&showinfo=true&holder=${encodeURIComponent(BANK_HOLDER)}`;
       const text = `🧾 <b>ĐƠN #${orderId}</b>\n\n📦 Gói: <b>${cfg.label}</b>\n💵 Số tiền: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>\n🏦 Ngân hàng: <b>${BANK_CODE}</b>\n👤 Chủ TK: <b>${BANK_HOLDER}</b>\n💳 Số TK: <code>${BANK_ACC}</code>\n\n📝 <b>NỘI DUNG CK (bắt buộc):</b>\n<code>${content}</code>\n\n⚠️ Chuyển <b>đúng nội dung & đúng số tiền</b>.\nSau khi CK, nhấn nút bên dưới.`;
       
       try {
         await bot.sendPhoto(chatId, qrUrl, { caption: text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } });
-        bot.deleteMessage(chatId, msgId);
+        bot.deleteMessage(chatId, msgId).catch(()=>{});
       } catch (e) {
-        bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } });
+        bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } }).catch(e => console.error("Lỗi editMessage:", e.message));
       }
     }
     else if (data.startsWith('paid_')) {
@@ -290,7 +289,7 @@ if (bot) {
       const order = res.rows[0];
       if (!order || order.status === 'paid') return bot.answerCallbackQuery(query.id, { text: 'Đơn không tồn tại hoặc đã xử lý', show_alert: true });
       
-      bot.editMessageCaption(query.message.caption + '\n\n⏳ <b>Đang kiểm tra giao dịch...</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML' });
+      bot.editMessageCaption(query.message.caption + '\n\n⏳ <b>Đang kiểm tra giao dịch...</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML' }).catch(()=>{});
 
       let tx = null;
       for (let i = 0; i < 5; i++) {
@@ -304,43 +303,43 @@ if (bot) {
       }
 
       if (!tx) {
-        return bot.editMessageCaption(query.message.caption.split('⏳')[0] + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!!</b>\nBot chưa thấy giao dịch khớp.', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔄 Kiểm tra lại', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } });
+        return bot.editMessageCaption(query.message.caption.split('⏳')[0] + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!!</b>\nBot chưa thấy giao dịch khớp.', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔄 Kiểm tra lại', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } }).catch(()=>{});
       }
 
       const key = genKey(order.plan);
       const cfg = PRICES[order.plan];
-      await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4', ['paid', Date.now() / 1000, key, orderId]);
-      await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, order.plan, cfg.days, Date.now() / 1000]);
+      await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4', ['paid', Date.now() / 1000, key, orderId]).catch(()=>{});
+      await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, order.plan, cfg.days, Date.now() / 1000]).catch(()=>{});
 
-      bot.editMessageCaption(`✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n📦 Gói: <b>${cfg.label}</b>\n\n⚠️ Key chỉ kích hoạt được 1 lần.\nNhập lại <b>KHÔNG cộng thêm</b> thời gian.`, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML' });
+      bot.editMessageCaption(`✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n📦 Gói: <b>${cfg.label}</b>\n\n⚠️ Key chỉ kích hoạt được 1 lần.\nNhập lại <b>KHÔNG cộng thêm</b> thời gian.`, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML' }).catch(()=>{});
       
       bot.sendMessage(ADMIN_ID, `💰 <b>ĐƠN MỚI</b>\nUser: ${user.first_name} (@${user.username || 'no_username'})\nGói: ${cfg.label}\nKey: <code>${key}</code>`, { parse_mode: 'HTML' }).catch(()=>{});
     }
     else if (data === 'enter_key') {
       userState[user.id] = 'WAITING_KEY';
-      bot.sendMessage(chatId, '🔑 <b>Nhập key của bạn</b>\n\nGửi key vào chat để kích hoạt.\n⚠️ Key chỉ kích hoạt 1 lần.', { parse_mode: 'HTML' });
+      bot.sendMessage(chatId, '🔑 <b>Nhập key của bạn</b>\n\nGửi key vào chat để kích hoạt.\n⚠️ Key chỉ kích hoạt 1 lần.', { parse_mode: 'HTML' }).catch(()=>{});
     }
     else if (data === 'admin_panel' && isAdmin(user)) {
-      const totalRes = await pool.query('SELECT COUNT(*) FROM keys');
-      const activeRes = await pool.query("SELECT COUNT(*) FROM keys WHERE is_active=1");
-      const revRes = await pool.query("SELECT SUM(amount) FROM orders WHERE status='paid'");
+      const totalRes = await pool.query('SELECT COUNT(*) FROM keys').catch(()=>({rows:[{count:0}]}));
+      const activeRes = await pool.query("SELECT COUNT(*) FROM keys WHERE is_active=1").catch(()=>({rows:[{count:0}]}));
+      const revRes = await pool.query("SELECT SUM(amount) FROM orders WHERE status='paid'").catch(()=>({rows:[{sum:0}]}));
       const rev = revRes.rows[0].sum || 0;
       bot.editMessageText(`👑 <b>ADMIN PANEL</b>\n\n🔑 Tổng key: <b>${totalRes.rows[0].count}</b>\n✅ Active: <b>${activeRes.rows[0].count}</b>\n💰 Doanh thu: <b>${rev.toLocaleString('vi-VN')}đ</b>`, { 
         chat_id: chatId, message_id: msgId, parse_mode: 'HTML',
         reply_markup: { inline_keyboard: [[{ text: '🎁 Tạo key tay', callback_data: 'admin_genkey' }], [{ text: '🔙 Quay lại', callback_data: 'back_start' }]] }
-      });
+      }).catch(()=>{});
     }
     else if (data === 'admin_genkey' && isAdmin(user)) {
       const keys = Object.entries(PRICES).map(([pid, cfg]) => [{ text: cfg.label, callback_data: `genkey_${pid}` }]);
       keys.push([{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]);
-      bot.editMessageText('🎁 <b>Chọn gói để tạo key:</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keys } });
+      bot.editMessageText('🎁 <b>Chọn gói để tạo key:</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keys } }).catch(()=>{});
     }
     else if (data.startsWith('genkey_') && isAdmin(user)) {
       const plan = data.replace('genkey_', '');
       const cfg = PRICES[plan];
       const key = genKey(plan);
-      await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, plan, cfg.days, Date.now() / 1000]);
-      bot.editMessageText(`✅ <b>ĐÃ TẠO KEY</b>\n\nGói: ${cfg.label}\n🔑 <code>${key}</code>`, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]] } });
+      await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, plan, cfg.days, Date.now() / 1000]).catch(()=>{});
+      bot.editMessageText(`✅ <b>ĐÃ TẠO KEY</b>\n\nGói: ${cfg.label}\n🔑 <code>${key}</code>`, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]] } }).catch(()=>{});
     }
 
     bot.answerCallbackQuery(query.id).catch(()=>{});
@@ -375,7 +374,7 @@ if (bot) {
           bot.sendMessage(chatId, `ℹ️ Key này <b>đã được kích hoạt trước đó</b>.\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn: <b>${expStr}</b>\n\n⚠️ <b>KHÔNG cộng thêm thời gian</b> khi nhập lại.`, { parse_mode: 'HTML' });
         }
       } catch (e) {
-        bot.sendMessage(chatId, 'Lỗi Server: ' + e.message);
+        bot.sendMessage(chatId, 'Lỗi Server: ' + e.message).catch(()=>{});
       }
     }
   });
