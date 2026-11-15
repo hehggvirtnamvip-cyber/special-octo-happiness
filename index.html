@@ -596,9 +596,15 @@ async function activateKey(){
     const data = await r.json();
     if (!data.ok) return showToast('❌ ' + (data.error || 'Thất bại'), 4000);
     
-    // Lưu key và hạn sử dụng
+    // SỬA LỖI TẠI ĐÂY: Kiểm tra an toàn hơn
     localStorage.setItem('hoangtool_key', key);
-    localStorage.setItem('hoangtool_expires', data.expires_at || 'null');
+    
+    // Nếu là vĩnh viễn (null), lưu chuỗi 'null'. Nếu có hạn, lưu số.
+    if (data.expires_at === null || data.expires_at === undefined) {
+        localStorage.setItem('hoangtool_expires', 'null');
+    } else {
+        localStorage.setItem('hoangtool_expires', String(data.expires_at));
+    }
     
     if (data.first_time){
       showToast('✅ Kích hoạt! Hạn: ' + data.expires_str, 5000);
@@ -625,14 +631,16 @@ function switchView(id){
 }
 
 async function playGame(token){
-  // KIỂM TRA KEY BẮT BUỘC
+  // KIỂM TRA KEY BẮT BUỘC VÀ ĐỒNG BỘ
   const savedKey = localStorage.getItem('hoangtool_key');
   const expiresAt = localStorage.getItem('hoangtool_expires');
   
   if (!savedKey || !expiresAt) {
     return showToast('Vui lòng kích hoạt key để sử dụng tool!', 4000);
   }
-  if (expiresAt !== 'null' && Date.now() > parseInt(expiresAt)) {
+  
+  // Đảm bảo ép kiểu về số trước khi so sánh
+  if (expiresAt !== 'null' && Date.now() > Number(expiresAt)) {
     localStorage.removeItem('hoangtool_key');
     localStorage.removeItem('hoangtool_expires');
     return showToast('Key đã hết hạn, vui lòng mua key mới!', 4000);
@@ -681,7 +689,6 @@ function startPredictionLoop(token){
 }
 
 async function updatePredictionNow(token){
-  // Nếu đang trong hiệu ứng xoay 10s thì không gọi API mới
   if (isSpinning) return;
 
   try {
@@ -689,7 +696,6 @@ async function updatePredictionNow(token){
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     
-    // Nếu là phiên mới
     if (lastPhien !== null && data.phien !== lastPhien) {
       isSpinning = true;
       startSpinAnimation();
@@ -717,12 +723,10 @@ function startSpinAnimation() {
   predText.className = 'tool-pred-text spinner';
   rateText.textContent = 'ĐANG PHÂN TÍCH';
   
-  // Hiệu ứng xoay vòng tròn
   circle.style.transition = 'none';
   circle.style.strokeDashoffset = 0;
-  circle.style.stroke = '#38bdf8'; // Màu xanh lam
+  circle.style.stroke = '#38bdf8'; 
   
-  // Xoay liên tục bằng CSS
   let deg = 0;
   const spinInterval = setInterval(() => {
     if (!isSpinning) {
@@ -746,7 +750,6 @@ function renderToolUI(d) {
   
   if (typeof conf !== 'number') conf = parseInt(conf) || 0;
 
-  // Reset hiệu ứng xoay
   circle.style.transition = 'stroke-dashoffset 1s ease-in-out, stroke 0.5s';
   circle.style.transform = 'rotate(-90deg)';
 
@@ -763,7 +766,6 @@ function renderToolUI(d) {
   circle.style.strokeDashoffset = offset;
   circle.style.stroke = 'url(#grad)';
 
-  // Thêm vào lịch sử
   if (historyBody.children.length === 0 || historyBody.children[0].dataset.phien !== d.phien) {
     const tr = document.createElement('tr');
     tr.dataset.phien = d.phien;
