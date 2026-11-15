@@ -99,7 +99,7 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
 .hero h1 .grad::before{content:'';position:absolute;left:-8px;right:-8px;bottom:0;height:5px;background:var(--hi-pink);z-index:-1;border-radius:2px;}
 .hero .sub{color:var(--ink-3);font-family:'Kalam',cursive;font-size:1.02rem;max-width:520px;margin:0 auto;line-height:1.75;}
 .hero .sub b{background:var(--hi-yellow);padding:1px 4px;font-weight:700;color:var(--ink);border-radius:2px;}
-.hero-key-section{margin-top:30px;display:flex;justify-content:center;}
+.hero-key-section{margin-top:30px;display:flex;justify-content:center;transition: opacity 0.3s;}
 .key-card{position:relative;background:var(--paper);border:2px solid var(--ink-2);border-radius:6px;
   padding:24px 28px 22px;max-width:480px;width:100%;
   box-shadow:4px 5px 0 rgba(120,90,55,.35),10px 14px 24px rgba(120,90,55,.15);
@@ -367,13 +367,13 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
   </div>
 
   <main>
-    <div class="hero">
+    <div class="hero" id="heroSection">
       <div class="stamp">SỔ TAY<br>GAME<br>2026</div>
       <div class="eyebrow"><span class="dot"></span> SỔ TAY GAME HOÀNG TOOL</div>
       <h1>Chọn <span class="grad">game</span><br>để bắt đầu</h1>
       <p class="sub">Nhấn vào game bạn muốn — game sẽ mở <b>giao diện AI</b> dự đoán trực tiếp.</p>
 
-      <div class="hero-key-section">
+      <div class="hero-key-section" id="keySection">
         <div class="key-card">
           <h3>🔑 Kích Hoạt Key</h3>
           <p>Nhập key để mở khóa kho game</p>
@@ -603,7 +603,7 @@ async function activateKey(){
     const data = await r.json();
     if (!data.ok) return showToast('❌ ' + (data.error || 'Thất bại'), 4000);
     
-    // ÉP LƯU DỮ LIỆU CHÍNH XÁC
+    // LƯU DỮ LIỆU VÀO MÁY
     localStorage.setItem('hoangtool_key', key);
     if (data.expires_at === null || data.expires_at === undefined) {
         localStorage.setItem('hoangtool_expires', 'null');
@@ -611,17 +611,20 @@ async function activateKey(){
         localStorage.setItem('hoangtool_expires', String(data.expires_at));
     }
     
+    // TỰ ĐỘNG CHUYỂN HƯỚNG QUA KHO TOOL NGAY LẬP TỨC
+    // 1. Ẩn thanh kích hoạt key
+    document.getElementById('viewKho').classList.add('key-active');
+    
+    // 2. Cuộn màn hình thẳng xuống danh sách Game
+    setTimeout(() => {
+        document.getElementById('games').scrollIntoView({behavior:'smooth'});
+    }, 200);
+
     if (data.first_time){
-      showToast('✅ Kích hoạt! Hạn: ' + data.expires_str, 3000);
+      showToast('✅ Kích hoạt thành công! Hạn: ' + data.expires_str, 3000);
     } else {
       showToast('ℹ️ Key đã kích hoạt trước đó', 3000);
     }
-    
-    // CẬP NHẬT GIAO DIỆN NGAY LẬP TỨC
-    document.getElementById('viewKho').classList.add('key-active');
-    setTimeout(() => {
-        document.getElementById('games').scrollIntoView({behavior:'smooth'});
-    }, 500);
 
   } catch(e){ 
     if (e.name === 'AbortError') {
@@ -646,7 +649,7 @@ function switchView(id){
 }
 
 async function playGame(token){
-  // KIỂM TRA CỰC KỲ CHẶT CHẼ
+  // KIỂM TRA CHẶT CHẼ - NẾU CHƯA CÓ KEY SẼ KHÔNG VÀO ĐƯỢC GAME
   const savedKey = localStorage.getItem('hoangtool_key');
   const expiresAt = localStorage.getItem('hoangtool_expires');
   
