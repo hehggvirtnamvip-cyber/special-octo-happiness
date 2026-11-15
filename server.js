@@ -41,12 +41,8 @@ const PRICES = {
   'life': { price: 220000, days: null, label: 'Vĩnh Viễn' },
 };
 
-// ========== DATABASE SETUP ==========
-if (!DATABASE_URL) {
-  console.error("❌ LỖI: Chưa có biến môi trường DATABASE_URL trên Render!");
-  console.error("👉 Hãy vào Tab Environment của Web Service và thêm DATABASE_URL.");
-}
-
+// ========== DATABASE ==========
+if (!DATABASE_URL) console.error("❌ THIẾU DATABASE_URL!");
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: DATABASE_URL ? { rejectUnauthorized: false } : false
@@ -67,12 +63,61 @@ async function initDB() {
         created_at DOUBLE PRECISION, paid_at DOUBLE PRECISION, key_issued TEXT
       );
     `);
-    console.log('✅ Kết nối Database thành công!');
-  } catch (err) {
-    console.error('❌ Lỗi khởi tạo DB:', err.message);
-  }
+    console.log('✅ Database OK!');
+  } catch (err) { console.error('❌ DB Error:', err.message); }
 }
 initDB();
+
+// ========== THUẬT TOÁN SICBO ==========
+function predictSicbo(history) {
+  if (!history || history.length < 3) return { du_doan: 'TÀI', tin_cay: 55 }; // Fallback
+  
+  // Lấy 15 phiên gần nhất, đảo ngược để tính từ cũ đến mới
+  const recent = history.slice(0, 15).map(h => h.resultType).reverse(); 
+  
+  let taiCount = recent.filter(x => x === 1).length;
+  let xiuCount = recent.filter(x => x === 0).length;
+  
+  let predict = '';
+  let confidence = 0;
+
+  // 1. Nhận diện cầu bệt (3 phiên trở lên giống nhau)
+  let streak = 1;
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i] === recent[i-1]) streak++;
+    else break;
+  }
+  
+  if (streak >= 3) {
+    // Bẻ cầu bệt
+    predict = recent[recent.length-1] === 1 ? 'XỈU' : 'TÀI';
+    confidence = 60 + (streak * 2); // Càng bệt lâu càng tự tin bẻ
+  } 
+  // 2. Nhận diện cầu 1-1 (Tài Xỉu xen kẽ)
+  else if (recent.length >= 4 && recent[recent.length-1] !== recent[recent.length-2] && recent[recent.length-2] !== recent[recent.length-3]) {
+    predict = recent[recent.length-1] === 1 ? 'XỈU' : 'TÀI';
+    confidence = 65;
+  }
+  // 3. Cầu 1-2 (2 Tài 1 Xỉu, hoặc ngược lại)
+  else if (recent.length >= 5) {
+    const last3 = recent.slice(-3);
+    if (last3[0] === last3[1] && last3[2] !== last3[1]) {
+      predict = last3[0] === 1 ? 'XỈU' : 'TÀI';
+      confidence = 60;
+    }
+  }
+
+  // Nếu không nhận diện được cầu, dựa vào số lượng nhiều hơn (không thiên vị)
+  if (!predict) {
+    predict = taiCount >= xiuCount ? 'TÀI' : 'XỈU';
+    confidence = 50 + Math.abs(taiCount - xiuCount) * 2;
+  }
+
+  // Giới hạn độ tin cậy 50-85%
+  confidence = Math.min(85, Math.max(50, confidence));
+  
+  return { du_doan: predict, tin_cay: confidence };
+}
 
 // ========== TOKEN MAP ==========
 let TOKEN_MAP = {};
@@ -103,7 +148,7 @@ function gameToToken(g) {
 }
 rebuildTokenMap();
 
-// ========== EXPRESS WEB SERVER ==========
+// ========== WEB API ==========
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
@@ -115,28 +160,25 @@ app.use('/api', (req, res, next) => { rebuildTokenMap(); next(); });
 
 app.get('/api/games', (req, res) => {
   const meta = {
-    md5:      { name: 'LC79 MD5', icon: 'fa-fingerprint', tagline: 'Tool MD5 — Phân tích mã băm', badge: 'V3' },
-    hu:       { name: 'LC79 Hũ', icon: 'fa-coins', tagline: 'Tool Hũ — Dự đoán realtime', badge: 'V3' },
-    luckywin: { name: 'Sicbo LuckyWin', icon: 'fa-dice', tagline: 'Tài Xỉu LuckyWin — AI dự đoán', badge: 'V3' },
-    sumclub:  { name: 'Sicbo SumClub', icon: 'fa-dice-d6', tagline: 'Tài Xỉu SumClub — AI dự đoán', badge: 'V3' },
+    md5:      { name: 'LC79 MD5', icon: 'fa-fingerprint', tagline: 'Phân tích mã băm', badge: 'V3' },
+    hu:       { name: 'LC79 Hũ', icon: 'fa-coins', tagline: 'Dự đoán realtime', badge: 'V3' },
+    luckywin: { name: 'Sicbo LuckyWin', icon: 'fa-dice', tagline: 'Thuật toán Sicbo độc quyền', badge: 'PRO' },
+    sumclub:  { name: 'Sicbo SumClub', icon: 'fa-dice-d6', tagline: 'Thuật toán Sicbo độc quyền', badge: 'PRO' },
   };
   const games = [];
   for (const [k, m] of Object.entries(meta)) {
     const t = gameToToken(k);
     if (t) games.push({ id: k, token: t, ...m });
   }
-  const expires_in = Math.ceil((TOKEN_ROTATE_MS - (Date.now() % TOKEN_ROTATE_MS)) / 1000);
-  res.json({ games, expires_in });
+  res.json({ games, expires_in: Math.ceil((TOKEN_ROTATE_MS - (Date.now() % TOKEN_ROTATE_MS)) / 1000) });
 });
 
 app.get('/api/predict/:token', async (req, res) => {
+  // Rate Limit
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   let rec = RATE_BUCKETS.get(ip);
   const now = Date.now();
-  if (!rec || now > rec.reset) {
-    rec = { count: 0, reset: now + RATE_LIMIT_WINDOW_MS };
-    RATE_BUCKETS.set(ip, rec);
-  }
+  if (!rec || now > rec.reset) { rec = { count: 0, reset: now + RATE_LIMIT_WINDOW_MS }; RATE_BUCKETS.set(ip, rec); }
   rec.count++;
   if (rec.count > RATE_LIMIT_MAX) return res.status(429).json({ error: 'Quá nhiều request' });
 
@@ -149,24 +191,29 @@ app.get('/api/predict/:token', async (req, res) => {
   try {
     const r = await axios.get(API_GAME_RAW[game], { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0' } });
     let raw = r.data || {};
-    let src = raw;
-    for (const k of ['data', 'result', 'prediction', 'predict']) {
-      if (raw[k] && typeof raw[k] === 'object') { src = raw[k]; break; }
-    }
-    let phien = src.phien || src.session || src.issue || src.id || src.ky || src.period || '';
-    let du_doan = src.du_doan || src.prediction || src.predict || src.result || src.ket_qua || src.bet || src.duDoan || '';
-    let tin_cay = src.tin_cay || src.confidence || src.rate || src.ti_le || src.prob || src.probability || src.win_rate || src.tyle || 0;
-    
-    tin_cay = parseFloat(String(tin_cay).replace('%', '').trim()) || 0;
-    if (tin_cay > 0 && tin_cay <= 1) tin_cay = Math.round(tin_cay * 100);
-    else tin_cay = Math.round(tin_cay);
+    let data = {};
 
-    if (typeof du_doan === 'string') {
-      du_doan = du_doan.toUpperCase().trim();
-      const map = { BIG: 'TÀI', TAI: 'TÀI', 'TÀI': 'TÀI', SMALL: 'XỈU', XIU: 'XỈU', 'XỈU': 'XỈU', EVEN: 'CHẴN', CHAN: 'CHẴN', 'CHẴN': 'CHẴN', ODD: 'LẺ', LE: 'LẺ', 'LẺ': 'LẺ' };
-      du_doan = map[du_doan] || du_doan;
+    if (game === 'md5' || game === 'hu') {
+      // Xử lý JSON của LC79
+      let src = raw.data || raw;
+      data = {
+        phien: String(src.phien_hien_tai || src.phien || ''),
+        du_doan: (src.du_doan || '').toUpperCase(),
+        tin_cay: parseInt(src.do_tin_cay) || 50
+      };
+    } else {
+      // Xử lý JSON Mảng của Sicbo (LuckyWin/SumClub)
+      let history = Array.isArray(raw) ? raw : (raw.data || []);
+      let phien = history.length > 0 ? history[0].gameNum : '';
+      let pred = predictSicbo(history);
+      
+      data = {
+        phien: String(phien),
+        du_doan: pred.du_doan,
+        tin_cay: pred.tin_cay
+      };
     }
-    const data = { phien: String(phien), du_doan: du_doan || '—', tin_cay };
+
     cache.set('p:' + game, { v: data, t: Date.now() });
     res.json(data);
   } catch (e) {
@@ -184,15 +231,17 @@ app.post('/api/key/activate', async (req, res) => {
     if (!row) return res.json({ ok: false, error: 'Key không tồn tại' });
 
     const now = Date.now() / 1000;
+    let finalExp = row.expires_at;
+
     if (row.activated_at === null || row.activated_at === undefined) {
-      const exp = row.duration_days === null ? null : now + row.duration_days * 86400;
-      await pool.query('UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1 WHERE key=$3', [now, exp, key]);
-      return res.json({ ok: true, first_time: true, plan: row.plan, expires_str: exp ? new Date(exp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn' });
+      finalExp = row.duration_days === null ? null : now + row.duration_days * 86400;
+      await pool.query('UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1 WHERE key=$3', [now, finalExp, key]);
+      return res.json({ ok: true, first_time: true, plan: row.plan, expires_at: finalExp, expires_str: finalExp ? new Date(finalExp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn' });
     }
     if (row.duration_days !== null && row.expires_at && now > row.expires_at) {
       return res.json({ ok: false, error: 'Key đã hết hạn', expires_str: new Date(row.expires_at * 1000).toLocaleString('vi-VN') });
     }
-    return res.json({ ok: true, first_time: false, plan: row.plan, expires_str: row.expires_at ? new Date(row.expires_at * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn' });
+    return res.json({ ok: true, first_time: false, plan: row.plan, expires_at: finalExp, expires_str: finalExp ? new Date(finalExp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn' });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -200,37 +249,21 @@ app.post('/api/key/activate', async (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// ========== TELEGRAM BOT (FIX LỖI & CHỐNG CRASH) ==========
+// ========== TELEGRAM BOT ==========
 let bot = null;
 try {
-  const httpsAgent = new https.Agent({  
-    rejectUnauthorized: false,
-    family: 4 
-  });
-
-  bot = new TelegramBot(BOT_TOKEN, { 
-    polling: true,
-    request: { agent: httpsAgent }
-  });
-
-  bot.on('polling_error', (error) => {
-    console.error('⚠️ Lỗi Polling (Bot có thể đang chạy ở nơi khác):', error.message);
-    // Không throw error, để Web Server tiếp tục chạy
-  });
-  console.log('🤖 Bot Telegram đã khởi động!');
-} catch (err) {
-  console.error('❌ Không thể khởi động Bot Telegram:', err.message);
-}
+  const httpsAgent = new https.Agent({ rejectUnauthorized: false, family: 4 });
+  bot = new TelegramBot(BOT_TOKEN, { polling: true, request: { agent: httpsAgent } });
+  bot.on('polling_error', (error) => console.error('⚠️ Lỗi Bot:', error.message));
+  console.log('🤖 Bot đã khởi động!');
+} catch (err) { console.error('❌ Lỗi khởi động Bot:', err.message); }
 
 const userState = {};
 function genKey(plan) {
   const pref = { '1d': 'HT1D', '4d': 'HT4D', '1w': 'HT1W', '1m': 'HT1M', '3m': 'HT3M', 'life': 'HTLIFE' }[plan];
-  const r = crypto.randomBytes(6).toString('hex').toUpperCase();
-  return `${pref}-${r.slice(0, 4)}-${r.slice(4, 8)}`;
+  return `${pref}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 }
-function isAdmin(user) {
-  return user.id === ADMIN_ID || (user.username && user.username.toLowerCase() === ADMIN_USER);
-}
+function isAdmin(user) { return user.id === ADMIN_ID || (user.username && user.username.toLowerCase() === ADMIN_USER); }
 
 async function showStart(chatId, user) {
   if (!bot) return;
@@ -244,7 +277,7 @@ async function showStart(chatId, user) {
       ]
     }
   };
-  await bot.sendMessage(chatId, `🦁 <b>HOÀNG TOOL</b>\nChào <b>${user.first_name}</b>!\n\n💰 <b>BẢNG GIÁ KEY</b>\n• 20k → 1 ngày\n• 30k → 4 ngày\n• 60k → 1 tuần\n• 120k → 1 tháng\n• 150k → 3 tháng\n• 220k → Vĩnh viễn\n\n👇 Chọn thao tác`, opts).catch(e => console.error("Lỗi gửi tin nhắn start:", e.message));
+  await bot.sendMessage(chatId, `🦁 <b>HOÀNG TOOL</b>\nChào <b>${user.first_name}</b>!\n\n💰 <b>BẢNG GIÁ KEY</b>\n• 20k → 1 ngày\n• 30k → 4 ngày\n• 60k → 1 tuần\n• 120k → 1 tháng\n• 150k → 3 tháng\n• 220k → Vĩnh viễn\n\n👇 Chọn thao tác`, opts).catch(()=>{});
 }
 
 if (bot) {
@@ -263,7 +296,7 @@ if (bot) {
     else if (data === 'buy_menu') {
       const keys = Object.entries(PRICES).map(([pid, cfg]) => [{ text: `💎 ${cfg.label} — ${cfg.price.toLocaleString('vi-VN')}đ`, callback_data: `buy_${pid}` }]);
       keys.push([{ text: '🔙 Quay lại', callback_data: 'back_start' }]);
-      bot.editMessageText('🛒 <b>Chọn gói key:</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keys } }).catch(e => console.error("Lỗi editMessage:", e.message));
+      bot.editMessageText('🛒 <b>Chọn gói key:</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keys } }).catch(()=>{});
     } 
     else if (data.startsWith('buy_')) {
       const plan = data.replace('buy_', '');
@@ -271,7 +304,7 @@ if (bot) {
       if (!cfg) return;
       const orderId = crypto.randomBytes(4).toString('hex').toUpperCase();
       const content = `HT${orderId}`;
-      await pool.query('INSERT INTO orders (id, user_id, username, full_name, plan, amount, content, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [orderId, user.id, user.username || '', user.first_name || '', plan, cfg.price, content, Date.now() / 1000]).catch(e => console.error("Lỗi insert order:", e.message));
+      await pool.query('INSERT INTO orders (id, user_id, username, full_name, plan, amount, content, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [orderId, user.id, user.username || '', user.first_name || '', plan, cfg.price, content, Date.now() / 1000]).catch(()=>{});
       
       const qrUrl = `https://vietqr.app/img?bank=${BANK_CODE}&acc=${BANK_ACC}&amount=${cfg.price}&addInfo=${content}&template=compact&showinfo=true&holder=${encodeURIComponent(BANK_HOLDER)}`;
       const text = `🧾 <b>ĐƠN #${orderId}</b>\n\n📦 Gói: <b>${cfg.label}</b>\n💵 Số tiền: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>\n🏦 Ngân hàng: <b>${BANK_CODE}</b>\n👤 Chủ TK: <b>${BANK_HOLDER}</b>\n💳 Số TK: <code>${BANK_ACC}</code>\n\n📝 <b>NỘI DUNG CK (bắt buộc):</b>\n<code>${content}</code>\n\n⚠️ Chuyển <b>đúng nội dung & đúng số tiền</b>.\nSau khi CK, nhấn nút bên dưới.`;
@@ -280,12 +313,12 @@ if (bot) {
         await bot.sendPhoto(chatId, qrUrl, { caption: text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } });
         bot.deleteMessage(chatId, msgId).catch(()=>{});
       } catch (e) {
-        bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } }).catch(e => console.error("Lỗi editMessage:", e.message));
+        bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } }).catch(()=>{});
       }
     }
     else if (data.startsWith('paid_')) {
       const orderId = data.replace('paid_', '');
-      const res = await pool.query('SELECT plan, amount, content, status FROM orders WHERE id=$1', [orderId]);
+      const res = await pool.query('SELECT plan, amount, content, status FROM orders WHERE id=$1', [orderId]).catch(()=>({rows:[]}));
       const order = res.rows[0];
       if (!order || order.status === 'paid') return bot.answerCallbackQuery(query.id, { text: 'Đơn không tồn tại hoặc đã xử lý', show_alert: true });
       
@@ -302,9 +335,7 @@ if (bot) {
         await new Promise(r => setTimeout(r, 2000));
       }
 
-      if (!tx) {
-        return bot.editMessageCaption(query.message.caption.split('⏳')[0] + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!!</b>\nBot chưa thấy giao dịch khớp.', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔄 Kiểm tra lại', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } }).catch(()=>{});
-      }
+      if (!tx) return bot.editMessageCaption(query.message.caption.split('⏳')[0] + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!!</b>\nBot chưa thấy giao dịch khớp.', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔄 Kiểm tra lại', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] } }).catch(()=>{});
 
       const key = genKey(order.plan);
       const cfg = PRICES[order.plan];
@@ -317,7 +348,7 @@ if (bot) {
     }
     else if (data === 'enter_key') {
       userState[user.id] = 'WAITING_KEY';
-      bot.sendMessage(chatId, '🔑 <b>Nhập key của bạn</b>\n\nGửi key vào chat để kích hoạt.\n⚠️ Key chỉ kích hoạt 1 lần.', { parse_mode: 'HTML' }).catch(()=>{});
+      bot.sendMessage(chatId, '🔑 <b>Nhập key của bạn</b>\n\nGửi key vào chat để kích hoạt.', { parse_mode: 'HTML' }).catch(()=>{});
     }
     else if (data === 'admin_panel' && isAdmin(user)) {
       const totalRes = await pool.query('SELECT COUNT(*) FROM keys').catch(()=>({rows:[{count:0}]}));
@@ -357,29 +388,29 @@ if (bot) {
       try {
         const res = await pool.query('SELECT plan, duration_days, activated_at, expires_at FROM keys WHERE key=$1', [key]);
         const row = res.rows[0];
-        if (!row) return bot.sendMessage(chatId, '❌ Key không tồn tại.');
+        if (!row) return bot.sendMessage(chatId, '❌ Key không tồn tại.').catch(()=>{});
         
         const now = Date.now() / 1000;
         const cfg = PRICES[row.plan] || { label: row.plan };
         
         if (row.activated_at === null || row.activated_at === undefined) {
           const exp = row.duration_days === null ? null : now + row.duration_days * 86400;
-          await pool.query('UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1 WHERE key=$3', [now, exp, key]);
+          await pool.query('UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1 WHERE key=$3', [now, exp, key]).catch(()=>{});
           const expStr = exp ? new Date(exp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn';
-          bot.sendMessage(chatId, `✅ <b>KÍCH HOẠT THÀNH CÔNG!</b>\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn dùng: <b>${expStr}</b>\n\n🌐 Vào web tool để sử dụng.`, { parse_mode: 'HTML' });
+          bot.sendMessage(chatId, `✅ <b>KÍCH HOẠT THÀNH CÔNG!</b>\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn dùng: <b>${expStr}</b>`, { parse_mode: 'HTML' }).catch(()=>{});
         } else if (row.duration_days !== null && row.expires_at && now > row.expires_at) {
-          bot.sendMessage(chatId, `❌ Key đã <b>hết hạn</b> từ ${new Date(row.expires_at * 1000).toLocaleString('vi-VN')}.`, { parse_mode: 'HTML' });
+          bot.sendMessage(chatId, `❌ Key đã <b>hết hạn</b> từ ${new Date(row.expires_at * 1000).toLocaleString('vi-VN')}.`, { parse_mode: 'HTML' }).catch(()=>{});
         } else {
           const expStr = row.expires_at ? new Date(row.expires_at * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn';
-          bot.sendMessage(chatId, `ℹ️ Key này <b>đã được kích hoạt trước đó</b>.\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn: <b>${expStr}</b>\n\n⚠️ <b>KHÔNG cộng thêm thời gian</b> khi nhập lại.`, { parse_mode: 'HTML' });
+          bot.sendMessage(chatId, `ℹ️ Key này <b>đã được kích hoạt trước đó</b>.\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn: <b>${expStr}</b>`, { parse_mode: 'HTML' }).catch(()=>{});
         }
       } catch (e) {
-        bot.sendMessage(chatId, 'Lỗi Server: ' + e.message).catch(()=>{});
+        bot.sendMessage(chatId, 'Lỗi Server!').catch(()=>{});
       }
     }
   });
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🌐 Web Server chạy tại http://localhost:${PORT}`);
+  console.log(`🌐 Web Server running on port ${PORT}`);
 });
