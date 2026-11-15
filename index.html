@@ -2,14 +2,14 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>KAIRO🦁 — Hệ Thống Key</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Orbitron:wght@600;800;900&family=Inter:wght@400;500;600;700;800&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
 <style>
-/* ================= CSS CŨ (NHẬP KEY) ================= */
+/* ================= CSS TRANG CHỦ (NHẬP KEY - GIỮ NGUYÊN) ================= */
 * { margin:0; padding:0; box-sizing:border-box; }
 :root{
   --bg1:#03050a; --bg2:#0a0f1c; --bg3:#0d1220;
@@ -33,6 +33,7 @@ body{font-family:var(--sans);background:linear-gradient(140deg,var(--bg1),var(--
 #matrixCanvas{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.55;} body.light #matrixCanvas{opacity:.28;}
 #gridCanvas{position:fixed;inset:0;z-index:1;pointer-events:none;mix-blend-mode:screen;} body.light #gridCanvas{mix-blend-mode:multiply;opacity:.9;}
 body::after{content:'';position:fixed;inset:0;z-index:2;pointer-events:none;background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,.55) 100%);} body.light::after{background:radial-gradient(ellipse at center,transparent 40%,rgba(30,60,120,.15) 100%);}
+
 .theme-toggle{position:fixed;top:22px;right:22px;z-index:100;width:54px;height:54px;border-radius:50%;background:var(--card);backdrop-filter:blur(16px);border:1px solid var(--border);color:var(--text);font-size:1.35rem;cursor:pointer;display:grid;place-items:center;box-shadow:0 10px 30px rgba(0,0,0,.4);transition:.35s cubic-bezier(.34,1.56,.64,1);}
 .theme-toggle:hover{transform:rotate(20deg) scale(1.08);box-shadow:var(--glow);border-color:var(--border-hi);}
 .theme-toggle .fa-sun{display:none;} body.light .theme-toggle .fa-sun{display:block;} body.light .theme-toggle .fa-moon{display:none;}
@@ -79,7 +80,7 @@ body::after{content:'';position:fixed;inset:0;z-index:2;pointer-events:none;back
 .btn-ghost:hover{border-color:var(--acc);color:var(--acc);transform:translateY(-2px);}
 .btn:disabled{opacity:.6;cursor:not-allowed;transform:none!important;}
 
-/* NOTEBOOK KEY INPUT */
+/* NOTEBOOK KEY INPUT (GIỮ NGUYÊN 100%) */
 .key-card{background:var(--card);backdrop-filter:blur(24px) saturate(160%);-webkit-backdrop-filter:blur(24px) saturate(160%);border:1px solid var(--border);border-radius:26px;padding:28px 26px 32px;position:relative;box-shadow:0 40px 80px -30px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.06);animation:cardIn .7s cubic-bezier(.34,1.56,.64,1);overflow:hidden;}
 @keyframes cardIn{from{opacity:0;transform:translateY(24px) scale(.97);}to{opacity:1;transform:none;}}
 .key-card::before{content:'';position:absolute;inset:-1px;border-radius:27px;background:linear-gradient(135deg,var(--acc),var(--acc2),var(--acc3),var(--cyan),var(--acc));background-size:300% 300%;z-index:-1;opacity:.4;animation:borderShine 8s linear infinite;filter:blur(1px);}
@@ -126,70 +127,96 @@ body.light .msg.err{color:#b91c1c;} body.light .msg.ok{color:#15803d;}
 .spin{animation:sp 1s linear infinite;}
 @keyframes sp{to{transform:rotate(360deg);}}
 
-/* ================= CSS KHO GAME (GIAO DIỆN GIẤY CŨ) ================= */
+
+/* ================= CSS KHO GAME (GIAO DIỆN XỊN) ================= */
 #viewKho {
   display: none; position: fixed; inset: 0; z-index: 50;
-  background-color: #efe6d4;
-  background-image: linear-gradient(#e0d5c0 1px, transparent 1px); background-size: 100% 28px;
-  color: #2a2118; font-family: var(--hand);
+  background: #0b1120;
+  color: #fff; font-family: var(--sans);
   flex-direction: column; overflow-y: auto;
 }
 #viewKho.active { display: flex; }
-#viewKho::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 10% 10%, rgba(255,255,255,0.4) 0%, transparent 50%); }
 
-.kho-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 30px; border-bottom: 2px dashed #c2b088; position: sticky; top: 0; background: rgba(239,230,212,0.95); backdrop-filter: blur(5px); z-index: 10; }
-.kho-header .logo { font-family: var(--display); font-size: 1.4rem; font-weight: 900; color: #b8281e; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-.btn-logout { background: #ffc4d4; border: 2px solid #2a2118; color: #2a2118; padding: 8px 16px; border-radius: 6px; font-family: var(--sans); font-weight: 700; font-size: 0.9rem; cursor: pointer; box-shadow: 2px 2px 0 #2a2118; transition: 0.1s; display: flex; align-items: center; gap: 6px; }
-.btn-logout:active { transform: translate(2px, 2px); box-shadow: 0 0 0 #2a2118; }
+.kho-header { 
+  display: flex; justify-content: space-between; align-items: center; 
+  padding: 20px 30px; background: rgba(15,23,42,0.8); backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255,255,255,0.05); position: sticky; top: 0; z-index: 10; 
+}
+.kho-header .logo { font-family: var(--display); font-size: 1.4rem; font-weight: 900; color: #38bdf8; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; text-shadow: 0 0 15px rgba(56,189,248,0.4); }
+.btn-logout { 
+  background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: #f87171; 
+  padding: 8px 16px; border-radius: 8px; font-family: var(--sans); font-weight: 600; font-size: 0.9rem; 
+  cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 6px; 
+}
+.btn-logout:hover { background: rgba(239,68,68,0.25); }
 
 .kho-container { padding: 30px 20px; max-width: 1000px; margin: 0 auto; width: 100%; }
 .game-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
 .game-card {
-  background: #fff3a8; border: 2px solid #2a2118; border-radius: 4px; padding: 24px;
-  text-align: center; position: relative; cursor: pointer;
-  box-shadow: 4px 4px 0 rgba(42,33,24,0.8); transition: transform 0.2s;
+  background: linear-gradient(145deg, #1e293b, #0f172a); border: 1px solid rgba(255,255,255,0.08); 
+  border-radius: 20px; padding: 24px; text-align: center; position: relative; cursor: pointer;
+  box-shadow: 0 10px 30px -15px rgba(0,0,0,0.8); transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.game-card:nth-child(even) { background: #b8dcff; }
-.game-card:nth-child(3n) { background: #c8eab0; }
-.game-card::before { content: '📌'; position: absolute; top: -12px; left: 50%; transform: translateX(-50%); font-size: 1.5rem; }
-.game-card:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 rgba(42,33,24,0.8); }
-.game-logo { width: 70px; height: 70px; margin: 0 auto 16px; background: #fff; border: 2px solid #2a2118; border-radius: 50%; display: grid; place-items: center; font-size: 2rem; color: #b8281e; box-shadow: 2px 2px 0 rgba(42,33,24,0.5); }
-.game-name { font-family: var(--hand); font-size: 1.8rem; font-weight: 700; margin-bottom: 6px; color: #2a2118; }
-.game-tagline { font-family: var(--sans); font-size: 0.85rem; color: #6e5c44; margin-bottom: 20px; }
-.btn-play { width: 100%; padding: 12px; border-radius: 4px; border: 2px solid #2a2118; background: #b8281e; color: #fff; font-family: var(--sans); font-weight: 700; font-size: 1rem; cursor: pointer; box-shadow: 3px 3px 0 #2a2118; transition: 0.1s; }
-.btn-play:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #2a2118; }
+.game-card:hover { transform: translateY(-5px); border-color: #38bdf8; box-shadow: 0 20px 40px -15px rgba(56,189,248,0.3); }
+.game-logo { width: 80px; height: 80px; margin: 0 auto 16px; background: rgba(56,189,248,0.1); border-radius: 24px; display: grid; place-items: center; font-size: 2.2rem; color: #38bdf8; box-shadow: inset 0 0 20px rgba(56,189,248,0.1); }
+.game-name { font-family: var(--display); font-size: 1.3rem; font-weight: 800; margin-bottom: 6px; letter-spacing: 0.5px; }
+.game-tagline { font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; }
+.btn-play { width: 100%; padding: 12px; border-radius: 12px; border: none; background: linear-gradient(135deg, #38bdf8, #3b82f6); color: #fff; font-weight: 700; font-size: 0.95rem; cursor: pointer; box-shadow: 0 4px 15px rgba(59,130,246,0.4); transition: 0.2s; }
+.btn-play:hover { box-shadow: 0 6px 20px rgba(59,130,246,0.6); filter: brightness(1.1); }
 
-/* TOOL UI (Vòng tròn dự đoán) */
-#viewTool { display: none; position: fixed; inset: 0; z-index: 60; background: #0f172a; flex-direction: column; }
+/* TOOL UI (GIAO DIỆN DỰ ĐOÁN) */
+#viewTool { display: none; position: fixed; inset: 0; z-index: 60; background: #0b1120; flex-direction: column; }
 #viewTool.active { display: flex; }
-.tool-header { padding: 20px; display: flex; justify-content: space-between; align-items: center; background: #1e293b; }
-.btn-back { background: transparent; border: none; color: #fff; font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 600; font-family: var(--sans); }
-.tool-header .title { font-family: var(--display); font-weight: 800; font-size: 1.1rem; color: #38bdf8; }
 
-.tool-main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
-.circle-wrap { position: relative; width: 260px; height: 260px; display: grid; place-items: center; margin-bottom: 30px; }
-.circle-svg { width: 100%; height: 100%; transform: rotate(-90deg); transition: transform 0.5s; }
-.circle-svg circle { fill: none; stroke-width: 14; stroke-linecap: round; }
-.circle-svg .bg { stroke: #1e293b; }
+.tool-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; background: #0f172a; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.btn-back { background: transparent; border: none; color: #cbd5e1; font-size: 1rem; cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 500; font-family: var(--sans); transition: 0.2s; padding: 8px 12px; border-radius: 8px; }
+.btn-back:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.tool-header .title { font-family: var(--display); font-weight: 800; font-size: 1.1rem; color: #38bdf8; letter-spacing: 1px; }
+
+.tool-main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 30px 15px; overflow: hidden; position: relative; }
+.tool-main::before { content: ''; position: absolute; top: -20%; left: 50%; transform: translateX(-50%); width: 80%; height: 50%; background: radial-gradient(circle, rgba(56,189,248,0.15) 0%, transparent 70%); pointer-events: none; }
+
+/* Vòng tròn */
+.circle-wrap { position: relative; width: 260px; height: 260px; display: grid; place-items: center; margin-bottom: 40px; flex-shrink: 0; }
+.circle-svg { width: 100%; height: 100%; transform: rotate(-90deg); transition: transform 0.5s ease-in-out; }
+.circle-svg circle { fill: none; stroke-width: 12; stroke-linecap: round; }
+.circle-svg .bg { stroke: rgba(255,255,255,0.05); }
 .circle-svg .progress { stroke: url(#grad); stroke-dasharray: 785; stroke-dashoffset: 785; transition: stroke-dashoffset 1s ease-in-out; }
-.circle-text { position: absolute; text-align: center; }
-.pred-text { font-family: var(--display); font-size: 4rem; font-weight: 900; color: #f472b6; text-shadow: 0 0 20px rgba(244,114,182,0.5); line-height: 1; }
-.pred-text.tai { color: #38bdf8; text-shadow: 0 0 20px rgba(56,189,248,0.5); }
-.rate-text { font-size: 1.2rem; color: #cbd5e1; margin-top: 10px; font-weight: 600; font-family: var(--sans); }
+.circle-text { position: absolute; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.pred-text { font-family: var(--display); font-size: 4rem; font-weight: 900; color: #f472b6; text-shadow: 0 0 25px rgba(244,114,182,0.6); line-height: 1; }
+.pred-text.tai { color: #38bdf8; text-shadow: 0 0 25px rgba(56,189,248,0.6); }
+.rate-text { font-size: 1.3rem; color: #cbd5e1; margin-top: 10px; font-weight: 600; font-family: var(--sans); }
 
-.history-panel { width: 100%; max-width: 600px; background: #1e293b; border-radius: 24px 24px 0 0; padding: 20px; flex: 1; overflow-y: auto; }
-.history-panel h3 { font-size: 1rem; color: #94a3b8; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 1px; font-family: var(--sans); }
-.history-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; font-family: var(--sans); }
-.history-table th { text-align: left; padding: 10px 5px; color: #94a3b8; border-bottom: 1px solid #334155; }
-.history-table td { padding: 12px 5px; border-bottom: 1px solid #334155; }
-.badge { padding: 4px 10px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; }
-.badge.x { background: rgba(244,114,182,0.15); color: #f472b6; }
-.badge.t { background: rgba(56,189,248,0.15); color: #38bdf8; }
-.badge.wait { background: rgba(250,204,21,0.15); color: #facc15; }
+/* Lịch sử - Kéo lên xuống */
+.history-panel { 
+  width: 100%; max-width: 600px; background: rgba(30,41,59,0.6); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.05); border-radius: 24px; padding: 20px; 
+  flex: 1; display: flex; flex-direction: column; min-height: 0; /* Quan trọng để scroll */
+}
+.history-panel h3 { font-size: 1rem; color: #94a3b8; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 1.5px; font-family: var(--sans); font-weight: 700; display: flex; align-items: center; gap: 8px;}
+.history-table-wrap { flex: 1; overflow-y: auto; padding-right: 5px; }
+/* Custom thanh cuộn cho đẹp */
+.history-table-wrap::-webkit-scrollbar { width: 6px; }
+.history-table-wrap::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 10px; }
+.history-table-wrap::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 10px; }
+
+.history-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; font-family: var(--sans); }
+.history-table th { text-align: left; padding: 10px 15px; color: #64748b; font-weight: 600; font-size: 0.85rem; position: sticky; top: 0; background: rgba(30,41,59,0.95); backdrop-filter: blur(5px); z-index: 2; }
+.history-table td { padding: 12px 15px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.history-table tr:hover td { background: rgba(255,255,255,0.02); }
+.badge { padding: 4px 12px; border-radius: 20px; font-weight: 700; font-size: 0.8rem; display: inline-block; }
+.badge.x { background: rgba(244,114,182,0.15); color: #f472b6; border: 1px solid rgba(244,114,182,0.3); }
+.badge.t { background: rgba(56,189,248,0.15); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3); }
+.badge.wait { background: rgba(250,204,21,0.15); color: #facc15; border: 1px solid rgba(250,204,21,0.3); }
 .spinner { animation: spin 1s linear infinite; }
 @keyframes spin { 100% { transform: rotate(360deg); } }
 
-@media(max-width:600px){ .navbar{padding:14px 18px;} .container{padding:0 16px;} .key-card{padding:22px 18px 26px;} .section{padding:56px 0;} .hero{padding-top:20px;} .theme-toggle{width:46px;height:46px;font-size:1.15rem;top:14px;right:14px;} .hero-stats{gap:20px;} .btn{padding:13px 20px;font-size:.9rem;} .notebook .field input{font-size:1.3rem;} .notebook .paper{padding:22px 16px 22px 40px;} .notebook .paper::before{left:28px;} .notebook .paper-head .title{font-size:1.25rem;} }
+@media(max-width:600px){
+  .tool-main { padding: 20px 15px; }
+  .circle-wrap { width: 220px; height: 220px; margin-bottom: 20px; }
+  .pred-text { font-size: 3.2rem; }
+  .history-panel { padding: 15px; border-radius: 20px; }
+}
 </style>
 </head>
 <body>
@@ -258,10 +285,10 @@ body.light .msg.err{color:#b91c1c;} body.light .msg.ok{color:#15803d;}
   </footer>
 </div>
 
-<!-- ================= TRANG KHO GAME (GIẤY CŨ) ================= -->
+<!-- ================= TRANG KHO GAME ================= -->
 <div id="viewKho">
   <div class="kho-header">
-    <div class="logo">🦁 KAIRO TOOL</div>
+    <div class="logo"><i class="fas fa-bolt"></i> KAIRO TOOL</div>
     <button class="btn-logout" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Đăng xuất</button>
   </div>
   <div class="kho-container">
@@ -296,11 +323,13 @@ body.light .msg.err{color:#b91c1c;} body.light .msg.ok{color:#15803d;}
     </div>
 
     <div class="history-panel">
-      <h3>Lịch sử dự đoán</h3>
-      <table class="history-table">
-        <thead><tr><th>Phiên</th><th>Dự đoán</th><th>Kết quả</th></tr></thead>
-        <tbody id="historyBody"></tbody>
-      </table>
+      <h3><i class="fas fa-history"></i> Lịch sử dự đoán</h3>
+      <div class="history-table-wrap">
+        <table class="history-table">
+          <thead><tr><th>Phiên</th><th>Dự đoán</th><th>Kết quả</th></tr></thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -382,7 +411,6 @@ $('formKey').addEventListener('submit', async e=>{
   btn.innerHTML = '<i class="fas fa-spinner spin"></i> Đang xác thực...';
 
   try {
-    // Gọi API kích hoạt
     const r = await fetch('/api/key/activate', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -395,7 +423,6 @@ $('formKey').addEventListener('submit', async e=>{
     toast('Key hợp lệ ✅');
     localStorage.setItem('kairo_key', key); // Lưu key
     
-    // Chuyển hướng
     setTimeout(()=>{ 
       $('viewHome').style.display = 'none';
       $('viewKho').classList.add('active');
@@ -505,7 +532,7 @@ async function fetchPrediction(isFirst) {
   }
 }
 
-// HÀM XOAY VÒNG TRÒN (Không xoay thanh)
+// HÀM XOAY VÒNG TRÒN
 function startSpin() {
   const predText = $('toolPredText');
   const rateText = $('toolRateText');
@@ -516,9 +543,8 @@ function startSpin() {
   predText.className = 'pred-text spinner';
   rateText.textContent = 'ĐANG PHÂN TÍCH';
   
-  // Xóa thanh chạy cũ, cho vòng tròn xoay
   circleBar.style.transition = 'none';
-  circleBar.style.strokeDashoffset = 785; // Ẩn thanh
+  circleBar.style.strokeDashoffset = 785; // Ẩn thanh chạy
   
   let deg = 0;
   const spinInterval = setInterval(() => {
@@ -528,7 +554,7 @@ function startSpin() {
       circleSvg.style.transform = 'rotate(-90deg)'; // Trả lại góc ban đầu
       return;
     }
-    deg += 10; // Tốc độ xoay
+    deg += 10;
     circleSvg.style.transform = `rotate(${deg}deg)`;
   }, 50);
 }
@@ -560,6 +586,7 @@ function renderTool(d) {
       <td><span class="badge wait">...</span></td>
     `;
     historyBody.prepend(tr);
+    // Giới hạn 15 dòng để không bị nặng máy
     if (historyBody.children.length > 15) historyBody.lastElementChild.remove();
   }
 }
