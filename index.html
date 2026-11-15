@@ -76,7 +76,7 @@ html,body{height:100%;background:var(--paper-warm);color:var(--ink);font-family:
 main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60px 120px 80px;}
 @media(max-width:768px){main{padding:32px 18px 90px 66px;}}
 @media(max-width:600px){main{padding:28px 16px 80px 62px;}}
-.hero{text-align:center;margin-bottom:56px;position:relative;}
+.hero{text-align:center;margin-bottom:56px;position:relative;transition: all 0.3s;}
 .stamp{position:absolute;top:-20px;right:0;width:90px;height:90px;border:3px solid var(--red-ink);border-radius:50%;
   display:flex;align-items:center;justify-content:center;font-family:'Caveat',cursive;font-size:1.1rem;font-weight:700;
   color:var(--red-ink);transform:rotate(-15deg);opacity:.55;pointer-events:none;text-align:center;line-height:1.1;
@@ -318,6 +318,7 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
 .key-active .hero h1 { display: none !important; }
 .key-active .hero .sub { display: none !important; }
 .key-active .hero .stamp { display: none !important; }
+.key-active .hero { margin-bottom: 0 !important; }
 
 @media(max-width:768px){.gutter{width:44px;}.gutter::before{left:38px;}.gutter::after{left:14px;}.topbar{padding-left:60px;}}
 @media(max-width:600px){
@@ -397,7 +398,6 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
       <div class="game-grid" id="gameGrid"></div>
     </div>
 
-    <!-- Các phần bên dưới chỉ hiển thị khi chưa có key, hoặc cứ để đó cũng được -->
     <div class="section" id="pricing">
       <div class="section-head">
         <div class="eyebrow">// BẢNG GIÁ</div>
@@ -494,7 +494,6 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
     if(t==='INPUT'||t==='TEXTAREA') return;
     e.preventDefault();
   });
-})(function(){
   document.addEventListener('keydown', e=>{
     const k=(e.key||'').toLowerCase();
     if(k==='f12') return e.preventDefault();
@@ -518,7 +517,6 @@ let lastPhien = null;
 let isSpinning = false;
 const REFRESH_MS = 6000;
 
-// KIỂM TRA KEY & ẨN/HIỆN KHUNG KÍCH HOẠT
 function checkAuthView() {
   const savedKey = localStorage.getItem('hoangtool_key');
   const expiresAt = localStorage.getItem('hoangtool_expires');
@@ -587,12 +585,22 @@ async function activateKey(){
   const key = document.getElementById('keyInput').value.trim();
   if (!key) return showToast('Vui lòng nhập key ✍️');
   if (key.length < 8) return showToast('Key không hợp lệ (quá ngắn)');
+  
   showToast('Đang kiểm tra key...');
+  
+  // Thêm Timeout 5 giây để chống đơ
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+
   try {
     const r = await fetch('/api/key/activate', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ key })
+      method:'POST', 
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ key }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
+    
     const data = await r.json();
     if (!data.ok) return showToast('❌ ' + (data.error || 'Thất bại'), 4000);
     
@@ -609,14 +617,18 @@ async function activateKey(){
       showToast('ℹ️ Key đã kích hoạt trước đó', 3000);
     }
     
-    // TỰ ĐỘNG CHUYỂN HƯỚNG QUA KHO TOOL (Ẩn khung kích hoạt)
+    // TỰ ĐỘNG CHUYỂN HƯỚNG QUA KHO TOOL
     setTimeout(() => {
         checkAuthView();
         document.getElementById('games').scrollIntoView({behavior:'smooth'});
     }, 1000);
 
   } catch(e){ 
-    showToast('Lỗi kết nối Server!', 4000); 
+    if (e.name === 'AbortError') {
+        showToast('❌ Server phản hồi quá chậm, vui lòng thử lại!', 4000);
+    } else {
+        showToast('Lỗi kết nối Server!', 4000); 
+    }
   }
 }
 
