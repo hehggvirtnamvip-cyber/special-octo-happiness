@@ -611,14 +611,11 @@ function backToKho() {
   $('viewKho').classList.add('active');
 }
 
-/* ================= LOGIC TOOL DỰ ĐOÁN (CHECK KẾT QUẢ ĐÚNG/SAI) ================= */
-let historyData = []; // Lưu trữ lịch sử để đối chiếu
-
+/* ================= LOGIC TOOL DỰ ĐOÁN ================= */
 function openTool(token, name) {
   currentToken = token;
   lastPhien = null;
   isSpinning = false;
-  historyData = []; // Reset lịch sử khi vào game mới
   
   $('toolTitle').textContent = name;
   
@@ -650,56 +647,21 @@ async function fetchPrediction(isFirst) {
     
     // Kiểm tra xem có phiên mới không
     if (lastPhien !== null && d.phien !== lastPhien) {
-      // Cập nhật kết quả của phiên cũ
-      updateResult(lastPhien, d.du_doan); // Lưu ý: API trả về dự đoán của phiên mới. Để biết kết quả phiên cũ, cần API trả về lịch sử. 
-      // Do API gốc trả về `phien` và `du_doan` hiện tại, ta cần lấy kết quả thực tế từ `du_doan` của phiên cũ (hoặc API lịch sử nếu có).
-      // Ở đây ta tạm dùng logic: Nếu phiên cũ có dự đoán là TÀI, và kết quả phiên mới báo (hoặc API lịch sử báo) là TÀI thì WIN.
-      // Tuy nhiên API của bạn không trả về kết quả phiên cũ ngay lập tức. Ta sẽ dựa vào `du_doan` của phiên đó.
-      // Tạm thời hiển thị "..." vì chưa có kết quả thực.
-      
       isSpinning = true;
       startSpin();
       
-      // Thêm vào bảng lịch sử
-      addHistoryRow(d.phien, d.du_doan);
-      
+      // Đợi 10s xoay xong mới render
       setTimeout(() => {
         isSpinning = false;
         renderTool(d);
       }, 10000);
     } else {
       renderTool(d);
-      if (historyData.length === 0) {
-        addHistoryRow(d.phien, d.du_doan);
-      }
     }
     lastPhien = d.phien;
   } catch(e) {
     console.error(e);
   }
-}
-
-// Thêm dòng vào bảng lịch sử
-function addHistoryRow(phien, duDoan) {
-  if (historyData.some(h => h.phien === phien)) return;
-  
-  historyData.unshift({ phien, duDoan, result: 'wait' });
-  
-  const tbody = $('historyBody');
-  const tr = document.createElement('tr');
-  tr.dataset.phien = phien;
-  
-  let badgeCls = (duDoan === 'TÀI' || duDoan === 'BIG') ? 'badge t' : 'badge x';
-  
-  tr.innerHTML = `
-    <td>#${phien}</td>
-    <td><span class="${badgeCls}">${duDoan}</span></td>
-    <td><span class="result-wait">...</span></td>
-    <td><span class="result-wait">...</span></td>
-  `;
-  tbody.prepend(tr);
-  
-  if (tbody.children.length > 20) tbody.lastElementChild.remove();
 }
 
 // HÀM XOAY VÒNG TRÒN
@@ -729,11 +691,12 @@ function startSpin() {
   }, 50);
 }
 
-// Render kết quả ra vòng tròn
+// Render kết quả ra vòng tròn & Bảng
 function renderTool(d) {
   const predText = $('toolPredText');
   const rateText = $('toolRateText');
   const circle = $('toolCircle');
+  const historyBody = $('historyBody');
 
   let pred = d.du_doan || '--';
   let conf = d.tin_cay || 0;
@@ -746,31 +709,30 @@ function renderTool(d) {
   const offset = 785 - (785 * Math.min(conf, 100) / 100);
   circle.style.strokeDashoffset = offset;
 
-  // Cập nhật kết quả cho các dòng trước đó (Giả lập logic check win/lose)
-  // Lưu ý: Vì API gốc của bạn không cung cấp lịch sử thắng thua rõ ràng cho từng phiên, 
-  // mình sẽ dùng kết quả thực tế của phiên hiện tại (d.du_doan) để check cho phiên trước.
-  const rows = $('historyBody').children;
-  for (let i = 0; i < rows.length; i++) {
-    const tr = rows[i];
-    const phien = tr.dataset.phien;
-    const record = historyData.find(h => h.phien === phien);
-    if (record && record.result === 'wait' && phien !== d.phien) {
-        // Phiên này đã có kết quả (vì đã sang phiên mới)
-        // Dựa vào kết quả thực tế của phiên đó (lấy từ API nếu có, hoặc giả lập)
-        // Do API ko trả về kết quả phiên cũ, mình sẽ mặc định cho nó là W/L dựa trên tỉ lệ thuận của phiên hiện tại.
-        // (Phần này bạn cần API cung cấp thêm mảng lịch sử thực tế để chính xác 100%).
-        
-        // Tạm thời hiển thị ngẫu nhiên cho đẹp UI (bạn có thể sửa logic này nếu API trả về true_result)
-        const isWin = Math.random() > 0.5; 
-        const resultTd = tr.children[2];
-        const evalTd = tr.children[3];
-        
-        // Giả lập kết quả
-        const actualResult = isWin ? record.duDoan : (record.duDoan === 'TÀI' ? 'XỈU' : 'TÀI');
-        resultTd.innerHTML = `<span class="${actualResult === 'TÀI' ? 'badge t' : 'badge x'}">${actualResult}</span>`;
-        evalTd.innerHTML = isWin ? `<span class="result-win">WIN</span>` : `<span class="result-lose">LOSE</span>`;
-        record.result = isWin ? 'win' : 'lose';
-    }
+  // Vẽ lại toàn bộ bảng lịch sử từ dữ liệu server trả về
+  if (d.history && Array.isArray(d.history)) {
+    historyBody.innerHTML = '';
+    d.history.forEach(item => {
+      const tr = document.createElement('tr');
+      
+      let badgeCls = (item.du_doan === 'TÀI' || item.du_doan === 'BIG') ? 'badge t' : 'badge x';
+      let resultHtml = `<span class="result-wait">...</span>`;
+      let evalHtml = `<span class="result-wait">...</span>`;
+
+      if (item.ket_qua) {
+        let actualCls = (item.ket_qua === 'TÀI' || item.ket_qua === 'BIG') ? 'badge t' : 'badge x';
+        resultHtml = `<span class="${actualCls}">${item.ket_qua}</span>`;
+        evalHtml = item.danh_gia === 'WIN' ? `<span class="result-win">WIN</span>` : `<span class="result-lose">LOSE</span>`;
+      }
+
+      tr.innerHTML = `
+        <td>#${item.phien}</td>
+        <td><span class="${badgeCls}">${item.du_doan}</span></td>
+        <td>${resultHtml}</td>
+        <td>${evalHtml}</td>
+      `;
+      historyBody.appendChild(tr);
+    });
   }
 }
 
