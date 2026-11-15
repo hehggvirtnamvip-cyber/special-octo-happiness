@@ -673,7 +673,7 @@ async function fetchPrediction(isFirst) {
     // XỬ LÝ KHI BỊ LỖI (Token hết hạn, mạng đứt, hoặc Crack)
     console.log("Lỗi API:", e.message);
     
-    if (retryCount < 3) {
+    if (retryCount < 5) { // Thử lại tối đa 5 lần (khoảng 25 giây)
         // Thử tự động lấy lại danh sách game (token mới) nếu bị lỗi
         retryCount++;
         console.log(`Thử lại lần ${retryCount}...`);
@@ -696,11 +696,11 @@ async function fetchPrediction(isFirst) {
         } catch (errG) {}
         
         // Đợi 2 giây rồi gọi lại API
-        setTimeout(() => fetchPrediction(false), 2000);
+        setTimeout(() => fetchPrediction(false), 5000); // Tăng thời gian chờ lên 5s cho Render khởi động
         return;
     }
 
-    // Nếu thử lại 3 lần vẫn lỗi thì hiện chữ Lỗi
+    // Nếu thử lại 5 lần vẫn lỗi thì hiện chữ Lỗi
     $('toolPredText').textContent = 'LỖI';
     $('toolRateText').textContent = 'KHÔNG CÓ SERVER';
     $('toolPredText').className = 'pred-text';
