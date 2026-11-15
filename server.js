@@ -104,7 +104,6 @@ const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Tắt Cache cho các API
 app.use((req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   next();
@@ -140,13 +139,12 @@ app.get('/api/predict/:token', async (req, res) => {
 
   const gameId = tokenToGame(req.params.token);
   
-  // BẪY CRACK
   if (!gameId) {
     return res.status(403).json({ error: "ĐỒ NGU + ÓC CẶC CŨNG ĐÒI CRACK. TOOL NÀY KHÔNG CÓ SERVER ĐỂ CHẠY ĐÂU!" });
   }
 
   try {
-    const r = await axios.get(API_GAME_RAW[gameId], { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await axios.get(API_GAME_RAW[gameId], { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0' } });
     let raw = r.data || {};
     let phien = '', du_doan = '', tin_cay = 50, ket_qua_thuc_te = '';
 
