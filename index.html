@@ -249,7 +249,7 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
 .tool-svg{width:100%;height:100%;transform:rotate(-90deg);}
 .tool-svg circle{fill:none;stroke-width:12;stroke-linecap:round;}
 .tool-svg .bg{stroke:#1e293b;}
-.tool-svg .progress{stroke:url(#grad);stroke-dasharray:628;stroke-dashoffset:628;transition:stroke-dashoffset 1s ease-in-out;}
+.tool-svg .progress{stroke:url(#grad);stroke-dasharray:628;stroke-dashoffset:628;transition:stroke-dashoffset 1s ease-in-out, stroke 0.5s;}
 .tool-circle-text{position:absolute;text-align:center;top:50%;left:50%;transform:translate(-50%,-50%);width:100%;}
 .tool-pred-text{font-family:'Caveat',cursive;font-size:4rem;font-weight:700;color:#f472b6;text-shadow:0 0 15px rgba(244,114,182,0.6);line-height:1;}
 .tool-pred-text.tai{color:#38bdf8;text-shadow:0 0 15px rgba(56,189,248,0.6);}
@@ -266,8 +266,6 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
 .badge{display:inline-block;padding:4px 10px;border-radius:15px;font-weight:700;font-size:0.75rem;text-align:center;min-width:48px;}
 .badge.x{background:rgba(244,114,182,0.15);color:#f472b6;border:1px solid rgba(244,114,182,0.3);}
 .badge.t{background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);}
-.badge.win{background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);}
-.badge.lose{background:rgba(248,113,113,0.15);color:#f87171;border:1px solid rgba(248,113,113,0.3);}
 .badge.wait{background:rgba(250,204,21,0.15);color:#facc15;border:1px solid rgba(250,204,21,0.3);}
 
 .menu-wrap{position:absolute;top:14px;left:14px;z-index:10005;}
@@ -311,6 +309,9 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
   background-image:linear-gradient(rgba(0,0,0,.02) 1px,transparent 1px);background-size:100% 22px;}
 #toast.show{transform:translateX(-50%) translateY(0) rotate(-3deg);opacity:1;}
 #toast i{color:var(--red-ink);margin-right:7px;}
+
+.spinner { animation: spin 1s linear infinite; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
 
 @media(max-width:768px){.gutter{width:44px;}.gutter::before{left:38px;}.gutter::after{left:14px;}.topbar{padding-left:60px;}}
 @media(max-width:600px){
@@ -520,16 +521,35 @@ function showToast(msg,dur=2400){
 
 let CONFIG_GAMES = [];
 let currentToken=null, predTimer=null;
+let lastPhien = null;
+let isSpinning = false;
 const REFRESH_MS = 6000;
+
+// KIỂM TRA KEY KHI VÀO WEB
+window.addEventListener('load', () => {
+  const savedKey = localStorage.getItem('hoangtool_key');
+  const expiresAt = localStorage.getItem('hoangtool_expires');
+  
+  if (!savedKey || !expiresAt) {
+    showToast('Vui lòng kích hoạt key để sử dụng tool!', 4000);
+  } else if (expiresAt !== 'null' && Date.now() > parseInt(expiresAt)) {
+    showToast('Key đã hết hạn, vui lòng mua key mới!', 4000);
+    localStorage.removeItem('hoangtool_key');
+    localStorage.removeItem('hoangtool_expires');
+  } else {
+    document.getElementById('keyInput').value = savedKey;
+  }
+  loadGames();
+});
 
 async function loadGames(){
   try {
     const r = await fetch('/api/games');
     const data = await r.json();
     CONFIG_GAMES = data.games;
+    renderGameGrid();
   } catch(e){
     console.warn('loadGames:', e);
-    CONFIG_GAMES = [];
   }
 }
 
@@ -575,17 +595,22 @@ async function activateKey(){
     });
     const data = await r.json();
     if (!data.ok) return showToast('❌ ' + (data.error || 'Thất bại'), 4000);
+    
+    // Lưu key và hạn sử dụng
+    localStorage.setItem('hoangtool_key', key);
+    localStorage.setItem('hoangtool_expires', data.expires_at || 'null');
+    
     if (data.first_time){
       showToast('✅ Kích hoạt! Hạn: ' + data.expires_str, 5000);
-      localStorage.setItem('hoangtool_key', key);
       setTimeout(() => document.getElementById('games').scrollIntoView({behavior:'smooth'}), 900);
     } else {
-      showToast('ℹ️ Key đã kích hoạt — không cộng thêm thời gian', 5000);
+      showToast('ℹ️ Key đã kích hoạt trước đó', 5000);
     }
   } catch(e){ 
     showToast('Lỗi kết nối Server!', 4000); 
   }
 }
+
 document.getElementById('pasteBtn').addEventListener('click', async () => {
   try {
     const txt = await navigator.clipboard.readText();
@@ -600,9 +625,26 @@ function switchView(id){
 }
 
 async function playGame(token){
+  // KIỂM TRA KEY BẮT BUỘC
+  const savedKey = localStorage.getItem('hoangtool_key');
+  const expiresAt = localStorage.getItem('hoangtool_expires');
+  
+  if (!savedKey || !expiresAt) {
+    return showToast('Vui lòng kích hoạt key để sử dụng tool!', 4000);
+  }
+  if (expiresAt !== 'null' && Date.now() > parseInt(expiresAt)) {
+    localStorage.removeItem('hoangtool_key');
+    localStorage.removeItem('hoangtool_expires');
+    return showToast('Key đã hết hạn, vui lòng mua key mới!', 4000);
+  }
+
   const cfg = CONFIG_GAMES.find(g => g.token === token);
   if (!cfg) return;
+  
   currentToken = token;
+  lastPhien = null;
+  isSpinning = false;
+  
   document.getElementById('gameTitleText').textContent = cfg.name;
   document.querySelector('#gameTitleBadge i').className = 'fas ' + cfg.icon;
 
@@ -610,6 +652,7 @@ async function playGame(token){
   document.getElementById('toolPredText').className = 'tool-pred-text';
   document.getElementById('toolRateText').textContent = '--%';
   document.getElementById('toolCircle').style.strokeDashoffset = 628;
+  document.getElementById('toolCircle').style.stroke = 'url(#grad)';
   document.getElementById('historyBody').innerHTML = '';
 
   switchView('viewPlay');
@@ -638,15 +681,58 @@ function startPredictionLoop(token){
 }
 
 async function updatePredictionNow(token){
+  // Nếu đang trong hiệu ứng xoay 10s thì không gọi API mới
+  if (isSpinning) return;
+
   try {
     const r = await fetch('/api/predict/' + encodeURIComponent(token));
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
-    renderToolUI(data);
+    
+    // Nếu là phiên mới
+    if (lastPhien !== null && data.phien !== lastPhien) {
+      isSpinning = true;
+      startSpinAnimation();
+      setTimeout(() => {
+        isSpinning = false;
+        renderToolUI(data);
+      }, 10000); // Xoay 10 giây
+    } else {
+      renderToolUI(data);
+    }
+    lastPhien = data.phien;
+
   } catch(e){
     document.getElementById('toolPredText').textContent = 'LỖI';
     document.getElementById('toolRateText').textContent = '--%';
   }
+}
+
+function startSpinAnimation() {
+  const predText = document.getElementById('toolPredText');
+  const rateText = document.getElementById('toolRateText');
+  const circle = document.getElementById('toolCircle');
+  
+  predText.textContent = '...';
+  predText.className = 'tool-pred-text spinner';
+  rateText.textContent = 'ĐANG PHÂN TÍCH';
+  
+  // Hiệu ứng xoay vòng tròn
+  circle.style.transition = 'none';
+  circle.style.strokeDashoffset = 0;
+  circle.style.stroke = '#38bdf8'; // Màu xanh lam
+  
+  // Xoay liên tục bằng CSS
+  let deg = 0;
+  const spinInterval = setInterval(() => {
+    if (!isSpinning) {
+      clearInterval(spinInterval);
+      predText.classList.remove('spinner');
+      return;
+    }
+    deg += 10;
+    circle.style.transform = `rotate(${deg}deg)`;
+  }, 50);
 }
 
 function renderToolUI(d) {
@@ -660,6 +746,10 @@ function renderToolUI(d) {
   
   if (typeof conf !== 'number') conf = parseInt(conf) || 0;
 
+  // Reset hiệu ứng xoay
+  circle.style.transition = 'stroke-dashoffset 1s ease-in-out, stroke 0.5s';
+  circle.style.transform = 'rotate(-90deg)';
+
   predText.textContent = pred;
   let cls = 'tool-pred-text';
   if (pred === 'TÀI' || pred === 'BIG') cls += ' tai';
@@ -671,7 +761,9 @@ function renderToolUI(d) {
   
   const offset = 628 - (628 * Math.min(conf, 100) / 100);
   circle.style.strokeDashoffset = offset;
+  circle.style.stroke = 'url(#grad)';
 
+  // Thêm vào lịch sử
   if (historyBody.children.length === 0 || historyBody.children[0].dataset.phien !== d.phien) {
     const tr = document.createElement('tr');
     tr.dataset.phien = d.phien;
@@ -708,13 +800,6 @@ document.querySelectorAll('.faq-q').forEach(q => {
     document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
     if (!wasOpen) item.classList.add('open');
   });
-});
-
-window.addEventListener('load', async () => {
-  await loadGames();
-  renderGameGrid();
-  const savedKey = localStorage.getItem('hoangtool_key');
-  if (savedKey) document.getElementById('keyInput').value = savedKey;
 });
 </script>
 </body>
