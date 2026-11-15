@@ -6,7 +6,7 @@ const { Pool } = require('pg');
 const TelegramBot = require('node-telegram-bot-api');
 const https = require('https');
 
-// ========== CONFIG BẢO MẬT ==========
+// ========== CONFIG ==========
 const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA";
 const ADMIN_ID = 7757046138;
 const ADMIN_USER = "tranhoang2286";
@@ -25,10 +25,10 @@ const TOKEN_ROTATE_MS = 3600000;
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// API THẬT BỊ ẨN BẰNG BASE64 (Không ai copy được từ code)
-const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01"; // https://game-lon-5
-const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q"; // sks.onrender.com/j
-const _k3 = "c29uLXByZWRpY3Qv"; // son-predict/
+// API THẬT BỊ ẨN BẰNG BASE64
+const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01";
+const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q";
+const _k3 = "c29uLXByZWRpY3Qv";
 const API_GAME_RAW = {
   md5: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9tZDU=").toString('ascii'), 
   hu: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9odQ==").toString('ascii'), 
@@ -99,10 +99,16 @@ function tokenToGame(t) { if (TOKEN_MAP[t]) return TOKEN_MAP[t]; const prevBucke
 function gameToToken(g) { for (const [t, k] of Object.entries(TOKEN_MAP)) if (k === g) return t; return null; }
 rebuildTokenMap();
 
-// ========== WEB SERVER & BẪY CRACK ==========
+// ========== WEB SERVER ==========
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
+
+// Tắt Cache cho các API
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
 
 const RATE_BUCKETS = new Map();
 app.use('/api', (req, res, next) => { rebuildTokenMap(); next(); });
@@ -124,7 +130,6 @@ app.get('/api/games', (req, res) => {
   res.json({ games, expires_in: Math.ceil((TOKEN_ROTATE_MS - (Date.now() % TOKEN_ROTATE_MS)) / 1000) });
 });
 
-// BẪY CRACK Ở ĐÂY: Nếu ai tự ý sửa link hoặc gọi sai token, sẽ hiện chữ chửi
 app.get('/api/predict/:token', async (req, res) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   let rec = RATE_BUCKETS.get(ip);
@@ -135,9 +140,9 @@ app.get('/api/predict/:token', async (req, res) => {
 
   const gameId = tokenToGame(req.params.token);
   
-  // NẾU TOKEN SAI -> TRẢ VỀ CHỮ CHỬI
+  // BẪY CRACK
   if (!gameId) {
-    return res.status(403).send("ĐỒ NGU + ÓC CẶC CŨNG ĐÒI CRACK. TOOL NÀY KHÔNG CÓ SERVER ĐỂ CHẠY ĐÂU!");
+    return res.status(403).json({ error: "ĐỒ NGU + ÓC CẶC CŨNG ĐÒI CRACK. TOOL NÀY KHÔNG CÓ SERVER ĐỂ CHẠY ĐÂU!" });
   }
 
   try {
@@ -165,7 +170,6 @@ app.get('/api/predict/:token', async (req, res) => {
     let historyArr = RUNTIME_HISTORY[gameId];
     let lastRecord = historyArr.length > 0 ? historyArr[0] : null;
 
-    // Tự động cập nhật kết quả phiên trước
     if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
       lastRecord.ket_qua = ket_qua_thuc_te;
       lastRecord.danh_gia = (lastRecord.du_doan === ket_qua_thuc_te) ? 'WIN' : 'LOSE';
@@ -181,7 +185,7 @@ app.get('/api/predict/:token', async (req, res) => {
     res.json({ phien, du_doan, tin_cay, history: historyArr });
   } catch (e) {
     console.error(e.message);
-    res.status(502).send("MẤT KẾT NỐI SERVER. KHÔNG CÓ DỮ LIỆU ĐỂ DỰ ĐOÁN!");
+    res.status(502).json({ error: "MẤT KẾT NỐI SERVER. KHÔNG CÓ DỮ LIỆU ĐỂ DỰ ĐOÁN!" });
   }
 });
 
