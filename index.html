@@ -313,6 +313,12 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
 .spinner { animation: spin 1s linear infinite; }
 @keyframes spin { 100% { transform: rotate(360deg); } }
 
+/* Ẩn phần kích hoạt key khi đã có key */
+.key-active .hero-key-section { display: none !important; }
+.key-active .hero h1 { display: none !important; }
+.key-active .hero .sub { display: none !important; }
+.key-active .hero .stamp { display: none !important; }
+
 @media(max-width:768px){.gutter{width:44px;}.gutter::before{left:38px;}.gutter::after{left:14px;}.topbar{padding-left:60px;}}
 @media(max-width:600px){
   body{font-size:14px;}
@@ -391,6 +397,7 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
       <div class="game-grid" id="gameGrid"></div>
     </div>
 
+    <!-- Các phần bên dưới chỉ hiển thị khi chưa có key, hoặc cứ để đó cũng được -->
     <div class="section" id="pricing">
       <div class="section-head">
         <div class="eyebrow">// BẢNG GIÁ</div>
@@ -404,19 +411,6 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
         <div class="price-card"><div class="price-dur">1 THÁNG</div><div class="price-amount">120K<span class="unit">/key</span></div><div class="price-desc">Tiết kiệm 20%</div><a href="https://t.me/KAIROBOTSHOPV2_BOT" target="_blank" class="price-buy"><i class="fab fa-telegram"></i> Mua</a></div>
         <div class="price-card"><div class="price-dur">3 THÁNG</div><div class="price-amount">150K<span class="unit">/key</span></div><div class="price-desc">Tiết kiệm 40%</div><a href="https://t.me/KAIROBOTSHOPV2_BOT" target="_blank" class="price-buy"><i class="fab fa-telegram"></i> Mua</a></div>
         <div class="price-card"><div class="price-dur">VĨNH VIỄN</div><div class="price-amount">220K<span class="unit">/key</span></div><div class="price-desc">Best value</div><a href="https://t.me/KAIROBOTSHOPV2_BOT" target="_blank" class="price-buy"><i class="fab fa-telegram"></i> Mua</a></div>
-      </div>
-    </div>
-
-    <div class="section" id="features">
-      <div class="section-head">
-        <div class="eyebrow">// TÍNH NĂNG</div>
-        <h2>Tại sao chọn <span class="grad">Hoàng Tool</span>?</h2>
-      </div>
-      <div class="features-grid">
-        <div class="feature-card"><div class="feature-icon"><i class="fas fa-bolt"></i></div><h4>Siêu nhanh</h4><p>Game mở tức thì, dự đoán realtime</p></div>
-        <div class="feature-card"><div class="feature-icon"><i class="fas fa-shield-halved"></i></div><h4>Bảo mật</h4><p>API mã hóa, key an toàn</p></div>
-        <div class="feature-card"><div class="feature-icon"><i class="fas fa-chart-pie"></i></div><h4>Giao diện AI</h4><p>Dự đoán trực quan, dễ nhìn</p></div>
-        <div class="feature-card"><div class="feature-icon"><i class="fas fa-headset"></i></div><h4>Hỗ trợ 24/7</h4><p>Admin online qua Telegram</p></div>
       </div>
     </div>
 
@@ -475,9 +469,7 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
             <th style="width:25%">ĐÁNH GIÁ</th>
           </tr>
         </thead>
-        <tbody id="historyBody">
-          <!-- Render bằng JS -->
-        </tbody>
+        <tbody id="historyBody"></tbody>
       </table>
     </div>
   </div>
@@ -502,6 +494,7 @@ main{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:54px 60p
     if(t==='INPUT'||t==='TEXTAREA') return;
     e.preventDefault();
   });
+})(function(){
   document.addEventListener('keydown', e=>{
     const k=(e.key||'').toLowerCase();
     if(k==='f12') return e.preventDefault();
@@ -525,20 +518,27 @@ let lastPhien = null;
 let isSpinning = false;
 const REFRESH_MS = 6000;
 
-// KIỂM TRA KEY KHI VÀO WEB
-window.addEventListener('load', () => {
+// KIỂM TRA KEY & ẨN/HIỆN KHUNG KÍCH HOẠT
+function checkAuthView() {
   const savedKey = localStorage.getItem('hoangtool_key');
   const expiresAt = localStorage.getItem('hoangtool_expires');
   
-  if (!savedKey || !expiresAt) {
-    showToast('Vui lòng kích hoạt key để sử dụng tool!', 4000);
-  } else if (expiresAt !== 'null' && Date.now() > parseInt(expiresAt)) {
-    showToast('Key đã hết hạn, vui lòng mua key mới!', 4000);
-    localStorage.removeItem('hoangtool_key');
-    localStorage.removeItem('hoangtool_expires');
+  if (savedKey && expiresAt) {
+      if (expiresAt !== 'null' && Date.now() > Number(expiresAt)) {
+          localStorage.removeItem('hoangtool_key');
+          localStorage.removeItem('hoangtool_expires');
+          document.getElementById('viewKho').classList.remove('key-active');
+      } else {
+          document.getElementById('viewKho').classList.add('key-active');
+          document.getElementById('keyInput').value = savedKey;
+      }
   } else {
-    document.getElementById('keyInput').value = savedKey;
+      document.getElementById('viewKho').classList.remove('key-active');
   }
+}
+
+window.addEventListener('load', () => {
+  checkAuthView();
   loadGames();
 });
 
@@ -596,10 +596,7 @@ async function activateKey(){
     const data = await r.json();
     if (!data.ok) return showToast('❌ ' + (data.error || 'Thất bại'), 4000);
     
-    // SỬA LỖI TẠI ĐÂY: Kiểm tra an toàn hơn
     localStorage.setItem('hoangtool_key', key);
-    
-    // Nếu là vĩnh viễn (null), lưu chuỗi 'null'. Nếu có hạn, lưu số.
     if (data.expires_at === null || data.expires_at === undefined) {
         localStorage.setItem('hoangtool_expires', 'null');
     } else {
@@ -607,11 +604,17 @@ async function activateKey(){
     }
     
     if (data.first_time){
-      showToast('✅ Kích hoạt! Hạn: ' + data.expires_str, 5000);
-      setTimeout(() => document.getElementById('games').scrollIntoView({behavior:'smooth'}), 900);
+      showToast('✅ Kích hoạt! Hạn: ' + data.expires_str, 3000);
     } else {
-      showToast('ℹ️ Key đã kích hoạt trước đó', 5000);
+      showToast('ℹ️ Key đã kích hoạt trước đó', 3000);
     }
+    
+    // TỰ ĐỘNG CHUYỂN HƯỚNG QUA KHO TOOL (Ẩn khung kích hoạt)
+    setTimeout(() => {
+        checkAuthView();
+        document.getElementById('games').scrollIntoView({behavior:'smooth'});
+    }, 1000);
+
   } catch(e){ 
     showToast('Lỗi kết nối Server!', 4000); 
   }
@@ -631,18 +634,16 @@ function switchView(id){
 }
 
 async function playGame(token){
-  // KIỂM TRA KEY BẮT BUỘC VÀ ĐỒNG BỘ
   const savedKey = localStorage.getItem('hoangtool_key');
   const expiresAt = localStorage.getItem('hoangtool_expires');
   
   if (!savedKey || !expiresAt) {
     return showToast('Vui lòng kích hoạt key để sử dụng tool!', 4000);
   }
-  
-  // Đảm bảo ép kiểu về số trước khi so sánh
   if (expiresAt !== 'null' && Date.now() > Number(expiresAt)) {
     localStorage.removeItem('hoangtool_key');
     localStorage.removeItem('hoangtool_expires');
+    checkAuthView();
     return showToast('Key đã hết hạn, vui lòng mua key mới!', 4000);
   }
 
@@ -702,7 +703,7 @@ async function updatePredictionNow(token){
       setTimeout(() => {
         isSpinning = false;
         renderToolUI(data);
-      }, 10000); // Xoay 10 giây
+      }, 10000); 
     } else {
       renderToolUI(data);
     }
