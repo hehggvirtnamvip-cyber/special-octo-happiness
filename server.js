@@ -17,9 +17,9 @@ const TelegramBot = require('node-telegram-bot-api');
 // ============================================================
 // CONFIG
 // ============================================================
-const BOT_TOKEN   = process.env.TELEGRAM_TOKEN || '';
-const ADMIN_ID    = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
-const ADMIN_USER  = (process.env.ADMIN_USER || '').toLowerCase();
+const BOT_TOKEN   = process.env.TELEGRAM_TOKEN || '9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA';
+const ADMIN_ID    = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : 7757046138;
+const ADMIN_USER  = (process.env.ADMIN_USER || '@tranhoang2286').toLowerCase();
 
 const BANK_CODE   = 'BIDV';
 const BANK_ACC    = '96247V4IWI';
