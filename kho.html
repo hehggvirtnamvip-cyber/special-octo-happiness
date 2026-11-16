@@ -1,3 +1,5 @@
+<!-- Copy lại y hệt file kho.html ở câu trả lời trước, không cần sửa gì thêm. -->
+<!-- Nhưng để chắc chắn, đây là code của nó: -->
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -11,13 +13,11 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background-color: #f2ead8; background-image: linear-gradient(#ded0b1 1px, transparent 1px); background-size: 100% 28px; color: #2a2118; font-family: 'Kalam', cursive; min-height: 100vh; overflow-x: hidden; display: flex; flex-direction: column; }
 
-/* Header */
 .kho-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 30px; border-bottom: 2px dashed #c2b088; background: rgba(242,234,216,0.95); backdrop-filter: blur(5px); position: sticky; top: 0; z-index: 10; }
 .kho-header .logo { font-family: 'Caveat', cursive; font-size: 1.6rem; font-weight: 700; color: #b8281e; display: flex; align-items: center; gap: 8px; }
 .btn-logout, .btn-back { background: #ffc4d4; border: 2px solid #2a2118; color: #2a2118; padding: 8px 16px; border-radius: 4px; font-family: 'Patrick Hand', cursive; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 3px 3px 0 #2a2118; transition: 0.1s; display: flex; align-items: center; gap: 6px; }
 .btn-logout:active, .btn-back:active { transform: translate(3px, 3px); box-shadow: 0 0 0 #2a2118; }
 
-/* View Kho */
 #viewKho { flex: 1; display: flex; flex-direction: column; padding: 30px 20px; max-width: 1000px; margin: 0 auto; width: 100%; }
 .game-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
 .game-card { background: #fff3a8; border: 2px solid #2a2118; border-radius: 2px; padding: 24px; text-align: center; position: relative; cursor: pointer; box-shadow: 4px 4px 0 rgba(42,33,24,0.8); transition: transform 0.2s; }
@@ -31,7 +31,6 @@ body { background-color: #f2ead8; background-image: linear-gradient(#ded0b1 1px,
 .btn-play { width: 100%; padding: 12px; border-radius: 4px; border: 2px solid #2a2118; background: #b8281e; color: #fff; font-family: 'Patrick Hand', cursive; font-weight: 700; font-size: 1.1rem; cursor: pointer; box-shadow: 3px 3px 0 #2a2118; transition: 0.1s; }
 .btn-play:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #2a2118; }
 
-/* View Tool */
 #viewTool { display: none; flex: 1; flex-direction: column; height: 100vh; }
 .tool-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; background: rgba(242,234,216,0.95); border-bottom: 2px dashed #c2b088; }
 .tool-header .title { font-family: 'Caveat', cursive; font-size: 1.6rem; font-weight: 700; color: #b8281e; }
