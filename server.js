@@ -10,7 +10,6 @@ const https = require('https');
 const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA";
 const ADMIN_ID = 7757046138;
 const ADMIN_USER = "tranhoang2286";
-const NOTIFY_CHAT = -1001234567890;
 
 const BANK_CODE = "BIDV";
 const BANK_ACC = "96247V4IWI";
@@ -20,12 +19,11 @@ const API_BANK = "https://reimagined-spork-bu28.onrender.com/lich-su";
 const PORT = process.env.PORT || 8000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
-const SECRET_KEY = 'hoangtool-secret-2026-DO-NOT-SHARE-CHANGE-ME';
+const SECRET_KEY = 'kairo-secret-2026-DO-NOT-SHARE-CHANGE-ME';
 const TOKEN_ROTATE_MS = 3600000;
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// API THẬT BỊ ẨN BẰNG BASE64
 const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01";
 const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q";
 const _k3 = "c29uLXByZWRpY3Qv";
@@ -45,7 +43,6 @@ const PRICES = {
   'life': { price: 220000, days: null, label: 'Vĩnh Viễn' },
 };
 
-// ========== DATABASE ==========
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: DATABASE_URL ? { rejectUnauthorized: false } : false
@@ -57,14 +54,12 @@ async function initDB() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, plan TEXT NOT NULL, duration_days INTEGER, created_at DOUBLE PRECISION NOT NULL, activated_at DOUBLE PRECISION, expires_at DOUBLE PRECISION, is_active INTEGER DEFAULT 0);
       CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, user_id BIGINT, username TEXT, full_name TEXT, plan TEXT, amount INTEGER, content TEXT, status TEXT DEFAULT 'pending', created_at DOUBLE PRECISION, paid_at DOUBLE PRECISION, key_issued TEXT);
-      CREATE TABLE IF NOT EXISTS game_history (id SERIAL PRIMARY KEY, game_id TEXT, phien TEXT, du_doan TEXT, ket_qua TEXT, danh_gia TEXT, created_at DOUBLE PRECISION);
     `);
     console.log('✅ Database OK!');
   } catch (err) { console.error('❌ DB Error:', err.message); }
 }
 initDB();
 
-// ========== THUẬT TOÁN SICBO ==========
 function predictSicbo(history) {
   if (!history || history.length < 3) return { du_doan: 'TÀI', tin_cay: 55 };
   const recent = history.slice(0, 15).map(h => h.resultType).reverse(); 
@@ -83,7 +78,6 @@ function predictSicbo(history) {
   return { du_doan: predict, tin_cay: confidence };
 }
 
-// ========== MÃ HÓA TOKEN ==========
 let TOKEN_MAP = {};
 let CURRENT_BUCKET = -1;
 function hourBucket() { return Math.floor(Date.now() / TOKEN_ROTATE_MS); }
@@ -99,7 +93,6 @@ function tokenToGame(t) { if (TOKEN_MAP[t]) return TOKEN_MAP[t]; const prevBucke
 function gameToToken(g) { for (const [t, k] of Object.entries(TOKEN_MAP)) if (k === g) return t; return null; }
 rebuildTokenMap();
 
-// ========== WEB SERVER & API ==========
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
@@ -112,7 +105,6 @@ app.use((req, res, next) => {
 const RATE_BUCKETS = new Map();
 app.use('/api', (req, res, next) => { rebuildTokenMap(); next(); });
 
-// Biến lưu trữ lịch sử để check win/loss
 let RUNTIME_HISTORY = { md5: [], hu: [], luckywin: [], sumclub: [] };
 
 app.get('/api/games', (req, res) => {
@@ -149,25 +141,20 @@ app.get('/api/predict/:token', async (req, res) => {
     let raw = r.data || {};
     let data = {};
 
-    // XỬ LÝ ĐÚNG CẤU TRÚC JSON NHƯ ẢNH BẠN GỬI
     if (gameId === 'md5' || gameId === 'hu') {
-      // API trả về thẳng cấu trúc: { phien_hien_tai, du_doan, do_tin_cay, lossHistory, winHistory... }
       const phien = String(raw.phien_hien_tai || '');
       const du_doan = (raw.du_doan || '').toUpperCase();
       const tin_cay = parseInt(raw.do_tin_cay) || 50;
-      const ket_qua_thuc_te = du_doan; // Dùng dự đoán hiện tại làm kết quả thực tế để check phiên trước
+      const ket_qua_thuc_te = du_doan; 
       
       data = { phien, du_doan, tin_cay };
 
-      // Xử lý lịch sử
       let historyArr = RUNTIME_HISTORY[gameId];
       let lastRecord = historyArr.length > 0 ? historyArr[0] : null;
 
       if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
         lastRecord.ket_qua = ket_qua_thuc_te;
         lastRecord.danh_gia = (lastRecord.du_doan === ket_qua_thuc_te) ? 'WIN' : 'LOSE';
-        pool.query('INSERT INTO game_history (game_id, phien, du_doan, ket_qua, danh_gia, created_at) VALUES ($1,$2,$3,$4,$5,$6)', 
-          [gameId, lastRecord.phien, lastRecord.du_doan, ket_qua_thuc_te, lastRecord.danh_gia, Date.now()/1000]).catch(()=>{});
       }
 
       if (!lastRecord || lastRecord.phien !== phien) {
@@ -177,7 +164,6 @@ app.get('/api/predict/:token', async (req, res) => {
       data.history = historyArr;
 
     } else {
-      // Xử lý Sicbo (Mảng)
       let history = Array.isArray(raw) ? raw : (raw.data || []);
       let phien = history.length > 0 ? String(history[0].gameNum) : '';
       let ket_qua_thuc_te = history.length > 0 ? (history[0].resultType === 1 ? 'TÀI' : 'XỈU') : '';
@@ -191,8 +177,6 @@ app.get('/api/predict/:token', async (req, res) => {
       if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
         lastRecord.ket_qua = ket_qua_thuc_te;
         lastRecord.danh_gia = (lastRecord.du_doan === ket_qua_thuc_te) ? 'WIN' : 'LOSE';
-        pool.query('INSERT INTO game_history (game_id, phien, du_doan, ket_qua, danh_gia, created_at) VALUES ($1,$2,$3,$4,$5,$6)', 
-          [gameId, lastRecord.phien, lastRecord.du_doan, ket_qua_thuc_te, lastRecord.danh_gia, Date.now()/1000]).catch(()=>{});
       }
 
       if (!lastRecord || lastRecord.phien !== phien) {
@@ -231,8 +215,6 @@ app.post('/api/key/activate', async (req, res) => {
     res.status(500).json({ ok: false, error: 'Lỗi server: ' + e.message });
   }
 });
-
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ========== TELEGRAM BOT ==========
 let bot = null;
