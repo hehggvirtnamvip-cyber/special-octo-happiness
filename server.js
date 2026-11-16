@@ -150,7 +150,6 @@ app.get('/api/predict/:token', async (req, res) => {
   let data = {};
 
   if (apiStatus === "OK" && raw) {
-    // XỬ LÝ DỮ LIỆU THẬT
     if (gameId === 'md5' || gameId === 'hu') {
       const phien = String(raw.phien_hien_tai || '');
       const du_doan = (raw.du_doan || '').toUpperCase();
@@ -163,19 +162,11 @@ app.get('/api/predict/:token', async (req, res) => {
       data = { phien, du_doan: pred.du_doan, tin_cay: pred.tin_cay, status: "LIVE" };
     }
   } else {
-    // XỬ LÝ FALLBACK (KHI API SẬP)
-    // Tạo phiên giả lập dựa trên thời gian để không bị trùng
     const phien = String(Math.floor(Date.now() / 10000)); 
-    const pred = predictSicbo(RUNTIME_HISTORY[gameId]); // Dùng lịch sử cũ để đoán
-    data = { 
-      phien: phien, 
-      du_doan: pred.du_doan, 
-      tin_cay: pred.tin_cay, 
-      status: "BẢO TRÌ" // Gắn cờ bảo trì
-    };
+    const pred = predictSicbo(RUNTIME_HISTORY[gameId]); 
+    data = { phien: phien, du_doan: pred.du_doan, tin_cay: pred.tin_cay, status: "BẢO TRÌ" };
   }
 
-  // Xử lý lịch sử (Áp dụng cho cả Live và Fallback)
   let historyArr = RUNTIME_HISTORY[gameId];
   let lastRecord = historyArr.length > 0 ? historyArr[0] : null;
   
