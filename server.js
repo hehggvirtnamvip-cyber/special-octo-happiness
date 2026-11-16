@@ -137,7 +137,20 @@ app.get('/api/predict/:token', async (req, res) => {
   }
 
   try {
-    const r = await axios.get(API_GAME_RAW[gameId], { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    let r;
+    let retries = 3;
+    // Thử lại 3 lần nếu API gốc bị lỗi
+    while (retries > 0) {
+      try {
+        r = await axios.get(API_GAME_RAW[gameId], { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } });
+        break;
+      } catch (err) {
+        retries--;
+        if (retries === 0) throw err;
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Đợi 2s rồi thử lại
+      }
+    }
+
     let raw = r.data || {};
     let data = {};
 
