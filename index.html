@@ -15,53 +15,22 @@
 <!-- ==================== BẢO MẬT CHỐNG DEVTOOLS & CRACK ==================== -->
 <script>
 (function() {
-    // 1. Chặn menu chuột phải (Inspect Element)
-    document.addEventListener('contextmenu', function(e) {
-        e.preventDefault();
-    });
-
-    // 2. Chặn các phím tắt mở DevTools
+    document.addEventListener('contextmenu', e => e.preventDefault());
     document.addEventListener('keydown', function(e) {
-        // Chặn F12
-        if (e.key === 'F12' || e.keyCode === 123) {
-            e.preventDefault();
-            return false;
-        }
-        // Chặn Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C
-        if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C' || e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) {
-            e.preventDefault();
-            return false;
-        }
-        // Chặn Ctrl+U (Xem mã nguồn)
-        if (e.ctrlKey && (e.key === 'U' || e.keyCode === 85)) {
-            e.preventDefault();
-            return false;
-        }
+        if (e.key === 'F12' || e.keyCode === 123) { e.preventDefault(); return false; }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) { e.preventDefault(); return false; }
+        if (e.ctrlKey && (e.key === 'U' || e.keyCode === 85)) { e.preventDefault(); return false; }
     });
-
-    // 3. Phát hiện nếu DevTools đang mở (dựa vào sự thay đổi kích thước cửa sổ / console)
     let devtoolsOpen = false;
     const element = new Image();
     Object.defineProperty(element, 'id', {
         get: function() {
             devtoolsOpen = true;
-            // Nếu phát hiện mở, hiện cảnh báo và treo trang
             document.body.innerHTML = "<div style='display:flex;justify-content:center;align-items:center;height:100vh;background:#0b1120;color:#ef4444;font-family:sans-serif;font-size:22px;font-weight:bold;text-align:center;padding:20px;line-height:1.6;'>PHÁT HIỆN HACK!<br>ĐỒ NGU ÓC CẶC ĐÒI CRACK TOOL HẢ?<br><br>VUI LÒNG TẮT DEVTOOLS / APP EXT ĐỂ TIẾP TỤC!</div>";
             throw new Error("DevTools Detected");
         }
     });
-
-    // Kích hoạt bẫy (Kiểm tra định kỳ 1 giây 1 lần)
-    setInterval(() => {
-        devtoolsOpen = false;
-        console.log(element); // Thao tác này sẽ kích hoạt getter ở trên nếu DevTools đang mở
-        console.clear(); // Xóa sạch log để không ai xem được
-    }, 1000);
-
-    // 4. Chặn bôi đen (Copy code)
-    document.addEventListener('selectstart', function(e) {
-        e.preventDefault();
-    });
+    setInterval(() => { devtoolsOpen = false; console.log(element); console.clear(); }, 1000);
 })();
 </script>
 <!-- ======================================================================= -->
@@ -620,7 +589,7 @@ let currentToken = null;
 let predTimer = null;
 let isSpinning = false;
 let lastPhien = null;
-let retryCount = 0; // Biến đếm số lần thử lại khi lỗi
+let retryCount = 0; 
 const REFRESH_MS = 6000; 
 
 function logout() {
@@ -696,7 +665,6 @@ function startPrediction() {
 async function fetchPrediction(isFirst) {
   if (isSpinning) return;
   try {
-    // THÊM TIMESTAMP ĐỂ CHỐNG CACHE TRÌNH DUYỆT
     const r = await fetch('/api/predict/' + encodeURIComponent(currentToken) + '?v=' + Date.now());
     
     let d;
@@ -710,7 +678,6 @@ async function fetchPrediction(isFirst) {
         throw new Error(d.error);
     }
     
-    // Nếu thành công, reset lại số lần thử lại
     retryCount = 0;
 
     if (lastPhien !== null && d.phien !== lastPhien) {
@@ -725,10 +692,9 @@ async function fetchPrediction(isFirst) {
     }
     lastPhien = d.phien;
   } catch(e) {
-    // XỬ LÝ KHI BỊ LỖI (Token hết hạn, mạng đứt, hoặc Crack)
     console.log("Lỗi API:", e.message);
     
-    if (retryCount < 5) { // Thử lại tối đa 5 lần (khoảng 25 giây)
+    if (retryCount < 5) { 
         retryCount++;
         console.log(`Thử lại lần ${retryCount}...`);
         
@@ -736,11 +702,9 @@ async function fetchPrediction(isFirst) {
         $('toolPredText').style.fontSize = '1.5rem';
         
         try {
-            // Lấy token mới
             const rg = await fetch('/api/games');
             const dataG = await rg.json();
             if (dataG.games && dataG.games.length > 0) {
-                // Tìm game hiện tại để lấy token mới
                 const cfg = dataG.games.find(g => g.name === $('toolTitle').textContent);
                 if (cfg) {
                     currentToken = cfg.token;
@@ -749,12 +713,10 @@ async function fetchPrediction(isFirst) {
             }
         } catch (errG) {}
         
-        // Đợi 5 giây rồi gọi lại API (chờ server Render khởi động)
-        setTimeout(() => fetchPrediction(false), 5000);
+        setTimeout(() => fetchPrediction(false), 5000); 
         return;
     }
 
-    // Nếu thử lại 5 lần vẫn lỗi thì hiện chữ Lỗi
     $('toolPredText').textContent = 'LỖI';
     $('toolRateText').textContent = 'KHÔNG CÓ SERVER';
     $('toolPredText').className = 'pred-text';
@@ -806,7 +768,6 @@ function renderTool(d) {
   let pred = d.du_doan || '--';
   let conf = d.tin_cay || 0;
 
-  // Reset lại style nếu trước đó bị lỗi
   predText.style.color = '';
   predText.style.fontSize = '';
 
@@ -850,8 +811,6 @@ if (localStorage.getItem('kairo_key')) {
   $('viewKho').classList.add('active');
   loadGames();
 }
-
-// MATRIX RAIN (Lược bớt phần vẽ canvas cho gọn)
 </script>
 </body>
 </html>
