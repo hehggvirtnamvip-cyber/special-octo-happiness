@@ -665,6 +665,7 @@ function startPrediction() {
 async function fetchPrediction(isFirst) {
   if (isSpinning) return;
   try {
+    // THÊM TIMESTAMP ĐỂ CHỐNG CACHE TRÌNH DUYỆT
     const r = await fetch('/api/predict/' + encodeURIComponent(currentToken) + '?v=' + Date.now());
     
     let d;
@@ -678,6 +679,7 @@ async function fetchPrediction(isFirst) {
         throw new Error(d.error);
     }
     
+    // Nếu thành công, reset lại số lần thử lại
     retryCount = 0;
 
     if (lastPhien !== null && d.phien !== lastPhien) {
@@ -692,9 +694,10 @@ async function fetchPrediction(isFirst) {
     }
     lastPhien = d.phien;
   } catch(e) {
+    // XỬ LÝ KHI BỊ LỖI (Token hết hạn, mạng đứt, hoặc Crack)
     console.log("Lỗi API:", e.message);
     
-    if (retryCount < 5) { 
+    if (retryCount < 5) { // Thử lại tối đa 5 lần (khoảng 25 giây)
         retryCount++;
         console.log(`Thử lại lần ${retryCount}...`);
         
@@ -702,9 +705,11 @@ async function fetchPrediction(isFirst) {
         $('toolPredText').style.fontSize = '1.5rem';
         
         try {
+            // Lấy token mới
             const rg = await fetch('/api/games');
             const dataG = await rg.json();
             if (dataG.games && dataG.games.length > 0) {
+                // Tìm game hiện tại để lấy token mới
                 const cfg = dataG.games.find(g => g.name === $('toolTitle').textContent);
                 if (cfg) {
                     currentToken = cfg.token;
@@ -713,10 +718,12 @@ async function fetchPrediction(isFirst) {
             }
         } catch (errG) {}
         
-        setTimeout(() => fetchPrediction(false), 5000); 
+        // Đợi 5 giây rồi gọi lại API (chờ server Render khởi động)
+        setTimeout(() => fetchPrediction(false), 5000);
         return;
     }
 
+    // Nếu thử lại 5 lần vẫn lỗi thì hiện chữ Lỗi
     $('toolPredText').textContent = 'LỖI';
     $('toolRateText').textContent = 'KHÔNG CÓ SERVER';
     $('toolPredText').className = 'pred-text';
@@ -768,6 +775,7 @@ function renderTool(d) {
   let pred = d.du_doan || '--';
   let conf = d.tin_cay || 0;
 
+  // Reset lại style nếu trước đó bị lỗi
   predText.style.color = '';
   predText.style.fontSize = '';
 
@@ -811,6 +819,8 @@ if (localStorage.getItem('kairo_key')) {
   $('viewKho').classList.add('active');
   loadGames();
 }
+
+// MATRIX RAIN (Lược bớt phần vẽ canvas cho gọn)
 </script>
 </body>
 </html>
