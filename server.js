@@ -2,7 +2,6 @@
  * KAIRO TOOL - Backend Server
  * Node.js / Express / PostgreSQL / Telegram Bot
  * Refactored: Security + Reliability Edition
- * Config: Admin ID & Username được điền sẵn.
  */
 
 'use strict';
@@ -16,13 +15,15 @@ const { Pool } = require('pg');
 const TelegramBot = require('node-telegram-bot-api');
 
 // ============================================================
-// CONFIG (ĐÃ CẬP NHẬT THEO THÔNG TIN CỦA BẠN)
+// CONFIG
 // ============================================================
-// Khuyên dùng biến môi trường (process.env.TELEGRAM_TOKEN) để bảo mật.
-// Nếu chưa set env, nó sẽ dùng token bạn vừa đưa.
 const BOT_TOKEN   = process.env.TELEGRAM_TOKEN || '9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA';
 const ADMIN_ID    = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : 7757046138;
 const ADMIN_USER  = (process.env.ADMIN_USER || 'tranhoang2286').toLowerCase();
+
+// 👇 ĐIỀN ID KÊNH CỦA BẠN VÀO ĐÂY (Ví dụ: -100123456789)
+// Kênh này phải có Bot của bạn làm Admin thì mới gửi tin nhắn được.
+const NOTIFY_CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID || '-100123456789'; 
 
 const BANK_CODE   = 'BIDV';
 const BANK_ACC    = '96247V4IWI';
@@ -32,7 +33,6 @@ const API_BANK = 'https://reimagined-spork-bu28.onrender.com/lich-su';
 const PORT     = process.env.PORT || 8000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
-// SECRET_KEY: BẮT BUỘC trên production
 const SECRET_KEY      = process.env.SECRET_KEY || crypto.randomBytes(32).toString('hex');
 const SECRET_KEY_PREV = process.env.SECRET_KEY_PREV || ''; 
 if (!process.env.SECRET_KEY) {
@@ -782,8 +782,11 @@ if (bot) {
           return;
         }
 
+        // --- THANH TOÁN THÀNH CÔNG ---
         const key = genKey(order.plan);
         const cfg = PRICES[order.plan];
+        
+        // 1. Cập nhật Database
         await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4',
           ['paid', Date.now() / 1000, key, orderId]).catch(() => {});
         await pool.query(
@@ -791,14 +794,32 @@ if (bot) {
           [key, order.plan, cfg.days, Date.now() / 1000]
         ).catch(() => {});
 
+        // 2. Gửi tin nhắn thông báo thành công cho User (Gửi tin nhắn mới để chắc chắn user nhận được)
         const successText =
           `✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n` +
           `🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n` +
           `📦 Gói: <b>${cfg.label}</b>\n\n` +
           `⚠️ Key chỉ kích hoạt được 1 lần.\nNhập lại <b>KHÔNG cộng thêm</b> thời gian.`;
+        
+        // Cập nhật lại bill thanh toán
         if (hasCaption) safeEditCaption(chatId, msgId, successText, { parse_mode: 'HTML' });
         else safeEdit(chatId, msgId, successText, { parse_mode: 'HTML' });
 
+        // Gửi thêm 1 tin nhắn riêng để đảm bảo user nhận được key
+        safeSend(chatId, `🔑 <b>KEY CỦA BẠN ĐÂY:</b>\n<code>${key}</code>\n\nHãy copy và nhấn "Nhập Key" để kích hoạt!`, { parse_mode: 'HTML' });
+
+        // 3. Gửi thông báo lên Kênh (Channel) mà Bot đang làm Admin
+        if (NOTIFY_CHANNEL_ID && NOTIFY_CHANNEL_ID !== '-100123456789') {
+          const channelMsg = 
+            `🎉 <b>CÓ NGƯỜI VỪA MUA KEY!</b>\n\n` +
+            `👤 Khách hàng: <b>${user.first_name || 'Ẩn danh'}</b>\n` +
+            `📦 Gói: <b>${cfg.label}</b>\n` +
+            `💵 Giá trị: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>\n\n` +
+            `🚀 Cảm ơn bạn đã ủng hộ KAIRO TOOL!`;
+          safeSend(NOTIFY_CHANNEL_ID, channelMsg, { parse_mode: 'HTML' });
+        }
+
+        // 4. Gửi thông báo cho Admin
         if (ADMIN_ID) {
           safeSend(ADMIN_ID,
             `💰 <b>ĐƠN MỚI</b>\nUser: ${user.first_name} (@${user.username || 'no_username'})\n` +
