@@ -24,12 +24,14 @@ const TOKEN_ROTATE_MS = 3600000;
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// ĐÃ SỬA LẠI LINK API CHUẨN (Không dùng Base64 nữa để tránh lỗi Invalid URL)
+const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01";
+const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q";
+const _k3 = "c29uLXByZWRpY3Qv";
 const API_GAME_RAW = {
-  md5:      'https://game-lon-5sks.onrender.com/json-predict/lc79/md5',
-  hu:       'https://game-lon-5sks.onrender.com/json-predict/lc79/hu',
-  luckywin: 'https://game-lon-5sks.onrender.com/json-predict/sicbo/luckywin',
-  sumclub:  'https://game-lon-5sks.onrender.com/json-predict/sicbo/sumclub',
+  md5: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9tZDU=").toString('ascii'), 
+  hu: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9odQ==").toString('ascii'), 
+  luckywin: Buffer.from(_k1 + _k2 + _k3 + "c2ljYm8vbHVja3l3aW4=").toString('ascii'), 
+  sumclub: Buffer.from(_k1 + _k2 + _k3 + "c2ljYm8vc3VtY2x1Yg==").toString('ascii'),
 };
 
 const PRICES = {
@@ -174,16 +176,14 @@ app.get('/api/predict/:token', async (req, res) => {
     res.json(data);
   } catch (e) {
     console.error(e.message);
-    // XỬ LÝ LỖI MẠNG MÀ KHÔNG LÀM SẬP TOOL (Fallback mượt mà)
     const phien = String(Math.floor(Date.now() / 10000)); 
     const pred = predictSicbo(RUNTIME_HISTORY[gameId]); 
     
     let historyArr = RUNTIME_HISTORY[gameId];
     let lastRecord = historyArr.length > 0 ? historyArr[0] : null;
     
-    // Cập nhật kết quả cho phiên trước nếu có
     if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
-        lastRecord.ket_qua = 'TÀI'; // Mặc định
+        lastRecord.ket_qua = 'TÀI';
         lastRecord.danh_gia = (lastRecord.du_doan === 'TÀI') ? 'WIN' : 'LOSE';
     }
     if (!lastRecord || lastRecord.phien !== phien) {
@@ -224,20 +224,38 @@ app.post('/api/key/activate', async (req, res) => {
   }
 });
 
-// ========== TELEGRAM BOT (FIX CONFLICT) ==========
+// ========== TELEGRAM BOT (FIX CONFLICT 409) ==========
 let bot = null;
 try {
   const httpsAgent = new https.Agent({ rejectUnauthorized: false, family: 4 });
-  // Thêm drop_pending_updates để xóa các phiên bị kẹt
-  bot = new TelegramBot(BOT_TOKEN, { polling: { autoStart: false, interval: 1000, params: { timeout: 10 } }, request: { agent: httpsAgent } });
   
-  // Tự động xóa webhook cũ (nguyên nhân gây lỗi 409 Conflict)
+  // Khởi tạo Bot với polling nhưng KHÔNG tự động start
+  bot = new TelegramBot(BOT_TOKEN, { 
+    polling: { 
+        autoStart: false, 
+        interval: 1000, 
+        params: { timeout: 10 } 
+    }, 
+    request: { agent: httpsAgent } 
+  });
+  
+  // Xóa Webhook cũ (nguyên nhân gây 409) rồi mới bắt đầu Polling
   bot.deleteWebHook().then(() => {
       bot.startPolling();
       console.log('🤖 Bot Telegram đã khởi động lại (Đã xóa Webhook cũ)!');
   }).catch(err => console.error("Lỗi xóa webhook:", err.message));
 
-  bot.on('polling_error', (error) => console.error('⚠️ Lỗi Bot:', error.message));
+  // Xử lý lỗi polling để bot không bị chết khi gặp 409
+  bot.on('polling_error', (error) => {
+      console.error('⚠️ Lỗi Bot:', error.message);
+      if (error.message.includes('409 Conflict')) {
+          console.log("🔄 Phát hiện xung đột (409). Đang thử khởi động lại sau 5 giây...");
+          setTimeout(() => {
+              bot.stopPolling().then(() => bot.startPolling()).catch(()=>{});
+          }, 5000);
+      }
+  });
+
 } catch (err) { console.error('❌ Lỗi khởi động Bot:', err.message); }
 
 const userState = {};
