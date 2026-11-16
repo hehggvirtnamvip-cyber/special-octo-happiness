@@ -10,6 +10,7 @@ const https = require('https');
 const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA";
 const ADMIN_ID = 7757046138;
 const ADMIN_USER = "tranhoang2286";
+const NOTIFY_CHAT = -1001234567890;
 
 const BANK_CODE = "BIDV";
 const BANK_ACC = "96247V4IWI";
@@ -19,15 +20,15 @@ const API_BANK = "https://reimagined-spork-bu28.onrender.com/lich-su";
 const PORT = process.env.PORT || 8000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
-const SECRET_KEY = 'kairo-secret-2026-DO-NOT-SHARE-CHANGE-ME';
+const SECRET_KEY = 'hoangtool-secret-2026-DO-NOT-SHARE-CHANGE-ME';
 const TOKEN_ROTATE_MS = 3600000;
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// API THẬT BỊ ẨN BẰNG BASE64 (Bảo mật tuyệt đối)
-const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01"; // https://game-lon-5
-const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q"; // sks.onrender.com/j
-const _k3 = "c29uLXByZWRpY3Qv"; // son-predict/
+// API THẬT BỊ ẨN BẰNG BASE64
+const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01";
+const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q";
+const _k3 = "c29uLXByZWRpY3Qv";
 const API_GAME_RAW = {
   md5: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9tZDU=").toString('ascii'), 
   hu: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9odQ==").toString('ascii'), 
@@ -111,6 +112,7 @@ app.use((req, res, next) => {
 const RATE_BUCKETS = new Map();
 app.use('/api', (req, res, next) => { rebuildTokenMap(); next(); });
 
+// Biến lưu trữ lịch sử để check win/loss
 let RUNTIME_HISTORY = { md5: [], hu: [], luckywin: [], sumclub: [] };
 
 app.get('/api/games', (req, res) => {
@@ -138,7 +140,6 @@ app.get('/api/predict/:token', async (req, res) => {
 
   const gameId = tokenToGame(req.params.token);
   
-  // BẪY CRACK
   if (!gameId) {
     return res.status(403).json({ error: "ĐỒ NGU + ÓC CẶC CŨNG ĐÒI CRACK. TOOL NÀY KHÔNG CÓ SERVER ĐỂ CHẠY ĐÂU!" });
   }
@@ -146,42 +147,64 @@ app.get('/api/predict/:token', async (req, res) => {
   try {
     const r = await axios.get(API_GAME_RAW[gameId], { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0' } });
     let raw = r.data || {};
-    let phien = '', du_doan = '', tin_cay = 50, ket_qua_thuc_te = '';
+    let data = {};
 
+    // XỬ LÝ ĐÚNG CẤU TRÚC JSON NHƯ ẢNH BẠN GỬI
     if (gameId === 'md5' || gameId === 'hu') {
-      let src = raw.data || raw;
-      phien = String(src.phien_hien_tai || src.phien || '');
-      du_doan = (src.du_doan || '').toUpperCase();
-      tin_cay = parseInt(src.do_tin_cay) || 50;
-      ket_qua_thuc_te = du_doan; 
-    } else {
-      let history = Array.isArray(raw) ? raw : (raw.data || []);
-      if (history.length > 0) {
-        phien = String(history[0].gameNum);
-        ket_qua_thuc_te = history[0].resultType === 1 ? 'TÀI' : 'XỈU';
+      // API trả về thẳng cấu trúc: { phien_hien_tai, du_doan, do_tin_cay, lossHistory, winHistory... }
+      const phien = String(raw.phien_hien_tai || '');
+      const du_doan = (raw.du_doan || '').toUpperCase();
+      const tin_cay = parseInt(raw.do_tin_cay) || 50;
+      const ket_qua_thuc_te = du_doan; // Dùng dự đoán hiện tại làm kết quả thực tế để check phiên trước
+      
+      data = { phien, du_doan, tin_cay };
+
+      // Xử lý lịch sử
+      let historyArr = RUNTIME_HISTORY[gameId];
+      let lastRecord = historyArr.length > 0 ? historyArr[0] : null;
+
+      if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
+        lastRecord.ket_qua = ket_qua_thuc_te;
+        lastRecord.danh_gia = (lastRecord.du_doan === ket_qua_thuc_te) ? 'WIN' : 'LOSE';
+        pool.query('INSERT INTO game_history (game_id, phien, du_doan, ket_qua, danh_gia, created_at) VALUES ($1,$2,$3,$4,$5,$6)', 
+          [gameId, lastRecord.phien, lastRecord.du_doan, ket_qua_thuc_te, lastRecord.danh_gia, Date.now()/1000]).catch(()=>{});
       }
+
+      if (!lastRecord || lastRecord.phien !== phien) {
+        historyArr.unshift({ phien, du_doan, ket_qua: null, danh_gia: null });
+        if (historyArr.length > 30) historyArr.pop();
+      }
+      data.history = historyArr;
+
+    } else {
+      // Xử lý Sicbo (Mảng)
+      let history = Array.isArray(raw) ? raw : (raw.data || []);
+      let phien = history.length > 0 ? String(history[0].gameNum) : '';
+      let ket_qua_thuc_te = history.length > 0 ? (history[0].resultType === 1 ? 'TÀI' : 'XỈU') : '';
       let pred = predictSicbo(history);
-      du_doan = pred.du_doan;
-      tin_cay = pred.tin_cay;
+      
+      data = { phien, du_doan: pred.du_doan, tin_cay: pred.tin_cay };
+
+      let historyArr = RUNTIME_HISTORY[gameId];
+      let lastRecord = historyArr.length > 0 ? historyArr[0] : null;
+
+      if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
+        lastRecord.ket_qua = ket_qua_thuc_te;
+        lastRecord.danh_gia = (lastRecord.du_doan === ket_qua_thuc_te) ? 'WIN' : 'LOSE';
+        pool.query('INSERT INTO game_history (game_id, phien, du_doan, ket_qua, danh_gia, created_at) VALUES ($1,$2,$3,$4,$5,$6)', 
+          [gameId, lastRecord.phien, lastRecord.du_doan, ket_qua_thuc_te, lastRecord.danh_gia, Date.now()/1000]).catch(()=>{});
+      }
+
+      if (!lastRecord || lastRecord.phien !== phien) {
+        historyArr.unshift({ phien, du_doan: pred.du_doan, ket_qua: null, danh_gia: null });
+        if (historyArr.length > 30) historyArr.pop();
+      }
+      data.history = historyArr;
     }
 
-    let historyArr = RUNTIME_HISTORY[gameId];
-    let lastRecord = historyArr.length > 0 ? historyArr[0] : null;
-
-    if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
-      lastRecord.ket_qua = ket_qua_thuc_te;
-      lastRecord.danh_gia = (lastRecord.du_doan === ket_qua_thuc_te) ? 'WIN' : 'LOSE';
-      pool.query('INSERT INTO game_history (game_id, phien, du_doan, ket_qua, danh_gia, created_at) VALUES ($1,$2,$3,$4,$5,$6)', 
-        [gameId, lastRecord.phien, lastRecord.du_doan, ket_qua_thuc_te, lastRecord.danh_gia, Date.now()/1000]).catch(()=>{});
-    }
-
-    if (!lastRecord || lastRecord.phien !== phien) {
-      historyArr.unshift({ phien, du_doan, ket_qua: null, danh_gia: null });
-      if (historyArr.length > 30) historyArr.pop();
-    }
-
-    res.json({ phien, du_doan, tin_cay, history: historyArr });
+    res.json(data);
   } catch (e) {
+    console.error(e.message);
     res.status(502).json({ error: "MẤT KẾT NỐI SERVER. KHÔNG CÓ DỮ LIỆU ĐỂ DỰ ĐOÁN!" });
   }
 });
