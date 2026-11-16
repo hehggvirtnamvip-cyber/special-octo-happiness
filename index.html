@@ -4,39 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
 <title>KAIRO🦁 — Hệ Thống Key</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Orbitron:wght@600;800;900&family=Inter:wght@400;500;600;700;800&family=Caveat:wght@600;700&family=Kalam:wght@300;400;700&family=Patrick+Hand&display=swap" rel="stylesheet">
-
-<!-- ==================== BẢO MẬT CHỐNG DEVTOOLS & CRACK ==================== -->
-<script>
-(function() {
-    document.addEventListener('contextmenu', e => e.preventDefault());
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'F12' || e.keyCode === 123) { e.preventDefault(); return false; }
-        if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) { e.preventDefault(); return false; }
-        if (e.ctrlKey && (e.key === 'U' || e.keyCode === 85)) { e.preventDefault(); return false; }
-    });
-    let devtoolsOpen = false;
-    const element = new Image();
-    Object.defineProperty(element, 'id', {
-        get: function() {
-            devtoolsOpen = true;
-            document.body.innerHTML = "<div style='display:flex;justify-content:center;align-items:center;height:100vh;background:#0b1120;color:#ef4444;font-family:sans-serif;font-size:22px;font-weight:bold;text-align:center;padding:20px;line-height:1.6;'>PHÁT HIỆN HACK!<br>ĐỒ NGU ÓC CẶC ĐÒI CRACK TOOL HẢ?<br><br>VUI LÒNG TẮT DEVTOOLS / APP EXT ĐỂ TIẾP TỤC!</div>";
-            throw new Error("DevTools Detected");
-        }
-    });
-    setInterval(() => { devtoolsOpen = false; console.log(element); console.clear(); }, 1000);
-})();
-</script>
-<!-- ======================================================================= -->
-
 <style>
-/* ================= CSS TRANG CHỦ ================= */
 * { margin:0; padding:0; box-sizing:border-box; }
 :root{
   --bg1:#03050a; --bg2:#0a0f1c; --bg3:#0d1220;
@@ -107,7 +78,6 @@ body::after{content:'';position:fixed;inset:0;z-index:2;pointer-events:none;back
 .btn-ghost:hover{border-color:var(--acc);color:var(--acc);transform:translateY(-2px);}
 .btn:disabled{opacity:.6;cursor:not-allowed;transform:none!important;}
 
-/* NOTEBOOK KEY INPUT */
 .key-card{background:var(--card);backdrop-filter:blur(24px) saturate(160%);-webkit-backdrop-filter:blur(24px) saturate(160%);border:1px solid var(--border);border-radius:26px;padding:28px 26px 32px;position:relative;box-shadow:0 40px 80px -30px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.06);animation:cardIn .7s cubic-bezier(.34,1.56,.64,1);overflow:hidden;}
 @keyframes cardIn{from{opacity:0;transform:translateY(24px) scale(.97);}to{opacity:1;transform:none;}}
 .key-card::before{content:'';position:absolute;inset:-1px;border-radius:27px;background:linear-gradient(135deg,var(--acc),var(--acc2),var(--acc3),var(--cyan),var(--acc));background-size:300% 300%;z-index:-1;opacity:.4;animation:borderShine 8s linear infinite;filter:blur(1px);}
@@ -154,7 +124,6 @@ body.light .msg.err{color:#b91c1c;} body.light .msg.ok{color:#15803d;}
 .spin{animation:sp 1s linear infinite;}
 @keyframes sp{to{transform:rotate(360deg);}}
 
-/* Các section giới thiệu */
 .section{padding:80px 0;position:relative;}
 .section-head{text-align:center;margin-bottom:56px;}
 .section-head .eyebrow{font-family:var(--mono);font-size:.8rem;color:var(--acc);text-transform:uppercase;letter-spacing:3px;margin-bottom:12px;font-weight:700;}
@@ -205,86 +174,10 @@ body.light .msg.err{color:#b91c1c;} body.light .msg.ok{color:#15803d;}
 .footer a:hover{text-decoration:underline;}
 .reveal{opacity:0;transform:translateY(30px);transition:.8s cubic-bezier(.2,.7,.2,1);}
 .reveal.in{opacity:1;transform:none;}
-
-
-/* ================= CSS KHO GAME & TOOL (GIAO DIỆN SỔ TAY) ================= */
-#viewKho, #viewTool {
-  display: none; position: fixed; inset: 0; z-index: 50;
-  background-color: #f2ead8;
-  background-image: linear-gradient(#ded0b1 1px, transparent 1px); background-size: 100% 28px;
-  color: #2a2118; font-family: 'Kalam', cursive;
-  flex-direction: column; overflow: hidden;
-}
-#viewKho.active, #viewTool.active { display: flex; }
-
-.kho-header { 
-  display: flex; justify-content: space-between; align-items: center; 
-  padding: 20px 30px; border-bottom: 2px dashed #c2b088; position: sticky; top: 0; 
-  background: rgba(242,234,216,0.95); backdrop-filter: blur(5px); z-index: 10; 
-}
-.kho-header .logo { font-family: 'Caveat', cursive; font-size: 1.6rem; font-weight: 700; color: #b8281e; display: flex; align-items: center; gap: 8px; }
-.btn-logout, .btn-back { 
-  background: #ffc4d4; border: 2px solid #2a2118; color: #2a2118; 
-  padding: 8px 16px; border-radius: 4px; font-family: 'Patrick Hand', cursive; font-size: 1rem; font-weight: 700; 
-  cursor: pointer; box-shadow: 3px 3px 0 #2a2118; transition: 0.1s; display: flex; align-items: center; gap: 6px; 
-}
-.btn-logout:active, .btn-back:active { transform: translate(3px, 3px); box-shadow: 0 0 0 #2a2118; }
-
-.kho-container { padding: 30px 20px; max-width: 1000px; margin: 0 auto; width: 100%; overflow-y: auto; flex: 1; }
-.game-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
-.game-card {
-  background: #fff3a8; border: 2px solid #2a2118; border-radius: 2px; padding: 24px;
-  text-align: center; position: relative; cursor: pointer;
-  box-shadow: 4px 4px 0 rgba(42,33,24,0.8); transition: transform 0.2s;
-}
-.game-card:nth-child(even) { background: #b8dcff; }
-.game-card:nth-child(3n) { background: #c8eab0; }
-.game-card::before { content: '📌'; position: absolute; top: -12px; left: 50%; transform: translateX(-50%); font-size: 1.5rem; }
-.game-card:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 rgba(42,33,24,0.8); }
-.game-logo { width: 70px; height: 70px; margin: 0 auto 16px; background: #fff; border: 2px solid #2a2118; border-radius: 50%; display: grid; place-items: center; font-size: 2rem; color: #b8281e; box-shadow: 2px 2px 0 rgba(42,33,24,0.5); }
-.game-name { font-family: 'Caveat', cursive; font-size: 1.8rem; font-weight: 700; margin-bottom: 6px; color: #2a2118; }
-.game-tagline { font-family: 'Kalam', cursive; font-size: 0.9rem; color: #6e5c44; margin-bottom: 20px; }
-.btn-play { width: 100%; padding: 12px; border-radius: 4px; border: 2px solid #2a2118; background: #b8281e; color: #fff; font-family: 'Patrick Hand', cursive; font-weight: 700; font-size: 1.1rem; cursor: pointer; box-shadow: 3px 3px 0 #2a2118; transition: 0.1s; }
-.btn-play:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #2a2118; }
-
-.tool-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; background: rgba(242,234,216,0.95); border-bottom: 2px dashed #c2b088; }
-.tool-header .title { font-family: 'Caveat', cursive; font-size: 1.6rem; font-weight: 700; color: #b8281e; }
-
-.tool-main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 20px; overflow-y: auto; }
-.circle-wrap { position: relative; width: 260px; height: 260px; display: grid; place-items: center; margin-bottom: 20px; flex-shrink: 0; }
-.circle-svg { width: 100%; height: 100%; transform: rotate(-90deg); transition: transform 0.5s ease-in-out; filter: drop-shadow(2px 4px 6px rgba(0,0,0,0.2)); }
-.circle-svg circle { fill: none; stroke-width: 12; stroke-linecap: round; }
-.circle-svg .bg { stroke: rgba(0,0,0,0.1); }
-.circle-svg .progress { stroke: url(#grad); stroke-dasharray: 785; stroke-dashoffset: 785; transition: stroke-dashoffset 1s ease-in-out; }
-.circle-text { position: absolute; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; background: rgba(255,255,255,0.6); border-radius: 50%; box-shadow: inset 0 0 20px rgba(0,0,0,0.05); margin: 10px; width: calc(100% - 20px); height: calc(100% - 20px); }
-.pred-text { font-family: 'Caveat', cursive; font-size: 4.5rem; font-weight: 700; color: #b8281e; line-height: 1; }
-.pred-text.tai { color: #1e4a8c; }
-.rate-text { font-size: 1.2rem; color: #453728; margin-top: 5px; font-weight: 700; font-family: 'Kalam', cursive; }
-
-.history-panel { width: 100%; max-width: 600px; background: #fffdf5; border: 2px solid #2a2118; border-radius: 6px; padding: 20px; box-shadow: 4px 4px 0 rgba(42,33,24,0.8); flex: 1; display: flex; flex-direction: column; min-height: 250px; }
-.history-panel h3 { font-family: 'Caveat', cursive; font-size: 1.4rem; font-weight: 700; color: #1e4a8c; border-bottom: 2px solid #1e4a8c; padding-bottom: 5px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
-.history-table-wrap { flex: 1; overflow-y: auto; padding-right: 5px; }
-.history-table { width: 100%; border-collapse: collapse; font-size: 1rem; font-family: 'Kalam', cursive; }
-.history-table th { text-align: left; padding: 8px 10px; color: #6e5c44; font-weight: 700; position: sticky; top: 0; background: #fffdf5; z-index: 2; }
-.history-table td { padding: 10px; border-bottom: 1px dashed #ded0b1; }
-.badge { padding: 2px 10px; border-radius: 4px; font-weight: 700; font-size: 0.9rem; display: inline-block; border: 1px solid transparent; }
-.badge.x { background: rgba(184,40,30,0.1); color: #b8281e; border-color: #b8281e; }
-.badge.t { background: rgba(30,74,140,0.1); color: #1e4a8c; border-color: #1e4a8c; }
-.badge.wait { background: rgba(110,92,68,0.1); color: #6e5c44; border-color: #6e5c44; }
-.result-win { color: #2e7a2e; font-weight: bold; font-family: 'Patrick Hand', cursive; font-size: 1.1rem; }
-.result-lose { color: #b8281e; font-weight: bold; font-family: 'Patrick Hand', cursive; font-size: 1.1rem; }
-.result-wait { color: #6e5c44; font-family: 'Patrick Hand', cursive; }
-.history-table-wrap::-webkit-scrollbar { width: 8px; }
-.history-table-wrap::-webkit-scrollbar-track { background: #f2ead8; border-radius: 4px; }
-.history-table-wrap::-webkit-scrollbar-thumb { background: #c2b088; border-radius: 4px; border: 2px solid #f2ead8; }
-.spinner { animation: spin 1s linear infinite; }
-@keyframes spin { 100% { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 
-<!-- ================= TRANG NHẬP KEY ================= -->
-<div id="viewHome">
   <canvas id="matrixCanvas"></canvas>
   <canvas id="gridCanvas"></canvas>
 
@@ -341,7 +234,6 @@ body.light .msg.err{color:#b91c1c;} body.light .msg.ok{color:#15803d;}
       </div>
     </section>
 
-    <!-- GIỚI THIỆU ĐẦY ĐỦ -->
     <section class="section" id="features">
       <div class="section-head reveal">
         <div class="eyebrow">// TÍNH NĂNG</div>
@@ -420,61 +312,10 @@ body.light .msg.err{color:#b91c1c;} body.light .msg.ok{color:#15803d;}
     <div class="nav-logo"><span class="lion">🦁</span><span>KAIRO</span></div>
     <p>© 2025 KAIRO🦁. Admin: <a href="https://t.me/tranhoang2286" target="_blank">@tranhoang2286</a> · Bot: <a href="https://t.me/KAIROBOTSHOPV2_BOT" target="_blank">@KAIROBOTSHOPV2_BOT</a></p>
   </footer>
-</div>
-
-<!-- ================= TRANG KHO GAME ================= -->
-<div id="viewKho">
-  <div class="kho-header">
-    <div class="logo">🦁 KAIRO TOOL</div>
-    <button class="btn-logout" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Đăng xuất</button>
-  </div>
-  <div class="kho-container">
-    <div class="game-grid" id="gameGrid"></div>
-  </div>
-</div>
-
-<!-- ================= TRANG TOOL DỰ ĐOÁN ================= -->
-<div id="viewTool">
-  <div class="tool-header">
-    <button class="btn-back" onclick="backToKho()"><i class="fas fa-arrow-left"></i> Trở về</button>
-    <div class="title" id="toolTitle">GAME</div>
-    <div style="width: 80px;"></div>
-  </div>
-  
-  <div class="tool-main">
-    <div class="circle-wrap">
-      <svg class="circle-svg" id="toolCircleSvg" viewBox="0 0 260 260">
-        <defs>
-          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#b8281e" />
-            <stop offset="100%" stop-color="#1e4a8c" />
-          </linearGradient>
-        </defs>
-        <circle class="bg" cx="130" cy="130" r="120"></circle>
-        <circle class="progress" id="toolCircle" cx="130" cy="130" r="120"></circle>
-      </svg>
-      <div class="circle-text">
-        <div class="pred-text" id="toolPredText">--</div>
-        <div class="rate-text" id="toolRateText">--%</div>
-      </div>
-    </div>
-
-    <div class="history-panel">
-      <h3><i class="fas fa-history"></i> Lịch sử & Dự đoán</h3>
-      <div class="history-table-wrap">
-        <table class="history-table">
-          <thead><tr><th>Phiên</th><th>Dự đoán</th><th>Kết quả</th><th>Đánh giá</th></tr></thead>
-          <tbody id="historyBody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
 
 <div class="toast" id="toast"><i class="fas fa-circle-check"></i><span id="toastText"></span></div>
 
 <script>
-/* ==================== LOGIC CHUNG ==================== */
 const $ = id => document.getElementById(id);
 function toast(msg, type='ok'){
   const t = $('toast'); $('toastText').textContent = msg;
@@ -491,14 +332,12 @@ function showMsg(txt, type='err'){
 }
 function hideMsg(){ $('msgBox').className = 'msg'; }
 
-/* THEME */
 if (localStorage.getItem('ht_theme') === 'light') document.body.classList.add('light');
 $('themeBtn').addEventListener('click', () => {
   document.body.classList.toggle('light');
   localStorage.setItem('ht_theme', document.body.classList.contains('light') ? 'light' : 'dark');
 });
 
-/* SCROLL REVEAL */
 const io = new IntersectionObserver(entries=>{
   entries.forEach(e=>{
     if (e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
@@ -506,7 +345,6 @@ const io = new IntersectionObserver(entries=>{
 }, { threshold:0.12 });
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 
-/* COUNTER */
 document.querySelectorAll('[data-count]').forEach(el=>{
   const target = +el.dataset.count;
   const obs = new IntersectionObserver(entries=>{
@@ -524,7 +362,6 @@ document.querySelectorAll('[data-count]').forEach(el=>{
   obs.observe(el);
 });
 
-/* FAQ */
 document.querySelectorAll('.faq-q').forEach(q=>{
   q.addEventListener('click', ()=>{
     const item = q.parentElement;
@@ -534,7 +371,6 @@ document.querySelectorAll('.faq-q').forEach(q=>{
   });
 });
 
-/* PASTE KEY */
 $('pasteBtn').addEventListener('click', async ()=>{
   try {
     const txt = await navigator.clipboard.readText();
@@ -543,7 +379,6 @@ $('pasteBtn').addEventListener('click', async ()=>{
   } catch(e){ toast('Trình duyệt không cho phép dán tự động','err'); }
 });
 
-/* LOGIC KÍCH HOẠT KEY */
 $('formKey').addEventListener('submit', async e=>{
   e.preventDefault();
   hideMsg();
@@ -564,15 +399,11 @@ $('formKey').addEventListener('submit', async e=>{
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'Key không hợp lệ');
 
-    showMsg('Kích hoạt thành công! Đang vào Kho Game... 🎉','ok');
+    showMsg('Kích hoạt thành công! Đang chuyển hướng... 🎉','ok');
     toast('Key hợp lệ ✅');
-    localStorage.setItem('kairo_key', key); 
+    localStorage.setItem('kairo_key', key);
     
-    setTimeout(()=>{ 
-      $('viewHome').style.display = 'none';
-      $('viewKho').classList.add('active');
-      loadGames(); 
-    }, 1000);
+    setTimeout(()=>{ window.location.href = '/kho.html'; }, 1000);
 
   } catch(err){
     showMsg(err.message || 'Lỗi kết nối server','err');
@@ -583,244 +414,9 @@ $('formKey').addEventListener('submit', async e=>{
   }
 });
 
-/* LOGIC KHO GAME */
-let CONFIG_GAMES = [];
-let currentToken = null;
-let predTimer = null;
-let isSpinning = false;
-let lastPhien = null;
-let retryCount = 0; 
-const REFRESH_MS = 6000; 
-
-function logout() {
-  localStorage.removeItem('kairo_key');
-  location.reload();
-}
-
-async function loadGames() {
-  try {
-    const r = await fetch('/api/games');
-    const data = await r.json();
-    CONFIG_GAMES = data.games;
-    renderGames();
-  } catch(e) { toast('Lỗi tải danh sách game', 'err'); }
-}
-
-function renderGames() {
-  const grid = $('gameGrid');
-  grid.innerHTML = '';
-  CONFIG_GAMES.forEach(g => {
-    const card = document.createElement('div');
-    card.className = 'game-card';
-    card.onclick = () => openTool(g.token, g.name);
-    card.innerHTML = `
-      <div class="game-logo"><i class="fas ${g.icon}"></i></div>
-      <div class="game-name">${g.name}</div>
-      <div class="game-tagline">${g.tagline}</div>
-      <button class="btn-play"><i class="fas fa-play"></i> BẮT ĐẦU</button>
-    `;
-    grid.appendChild(card);
-  });
-}
-
-function backToKho() {
-  clearInterval(predTimer);
-  retryCount = 0;
-  $('viewTool').classList.remove('active');
-  $('viewKho').classList.add('active');
-}
-
-/* ================= LOGIC TOOL DỰ ĐOÁN ================= */
-function openTool(token, name) {
-  currentToken = token;
-  lastPhien = null;
-  isSpinning = false;
-  retryCount = 0;
-  
-  $('toolTitle').textContent = name;
-  
-  // Reset UI
-  $('toolPredText').textContent = '--';
-  $('toolPredText').className = 'pred-text';
-  $('toolPredText').style.color = ''; 
-  $('toolPredText').style.fontSize = '';
-  $('toolRateText').textContent = '--%';
-  $('toolRateText').style.color = '';
-  $('toolCircle').style.strokeDashoffset = 785;
-  $('toolCircleSvg').style.transform = 'rotate(-90deg)'; 
-  $('historyBody').innerHTML = '';
-
-  $('viewKho').classList.remove('active');
-  $('viewTool').classList.add('active');
-  
-  startPrediction();
-}
-
-function startPrediction() {
-  clearInterval(predTimer);
-  fetchPrediction(true);
-  predTimer = setInterval(() => fetchPrediction(false), REFRESH_MS);
-}
-
-async function fetchPrediction(isFirst) {
-  if (isSpinning) return;
-  try {
-    // THÊM TIMESTAMP ĐỂ CHỐNG CACHE TRÌNH DUYỆT
-    const r = await fetch('/api/predict/' + encodeURIComponent(currentToken) + '?v=' + Date.now());
-    
-    let d;
-    try {
-      d = await r.json();
-    } catch (err) {
-      throw new Error("SERVER_DISCONNECTED");
-    }
-    
-    if (d.error) {
-        throw new Error(d.error);
-    }
-    
-    // Nếu thành công, reset lại số lần thử lại
-    retryCount = 0;
-
-    if (lastPhien !== null && d.phien !== lastPhien) {
-      isSpinning = true;
-      startSpin();
-      setTimeout(() => {
-        isSpinning = false;
-        renderTool(d);
-      }, 10000);
-    } else {
-      renderTool(d);
-    }
-    lastPhien = d.phien;
-  } catch(e) {
-    // XỬ LÝ KHI BỊ LỖI (Token hết hạn, mạng đứt, hoặc Crack)
-    console.log("Lỗi API:", e.message);
-    
-    if (retryCount < 5) { // Thử lại tối đa 5 lần (khoảng 25 giây)
-        retryCount++;
-        console.log(`Thử lại lần ${retryCount}...`);
-        
-        $('toolPredText').textContent = 'ĐANG KẾT NỐI LẠI...';
-        $('toolPredText').style.fontSize = '1.5rem';
-        
-        try {
-            // Lấy token mới
-            const rg = await fetch('/api/games');
-            const dataG = await rg.json();
-            if (dataG.games && dataG.games.length > 0) {
-                // Tìm game hiện tại để lấy token mới
-                const cfg = dataG.games.find(g => g.name === $('toolTitle').textContent);
-                if (cfg) {
-                    currentToken = cfg.token;
-                    console.log("Đã lấy token mới:", currentToken);
-                }
-            }
-        } catch (errG) {}
-        
-        // Đợi 5 giây rồi gọi lại API (chờ server Render khởi động)
-        setTimeout(() => fetchPrediction(false), 5000);
-        return;
-    }
-
-    // Nếu thử lại 5 lần vẫn lỗi thì hiện chữ Lỗi
-    $('toolPredText').textContent = 'LỖI';
-    $('toolRateText').textContent = 'KHÔNG CÓ SERVER';
-    $('toolPredText').className = 'pred-text';
-    $('toolPredText').style.color = '#b8281e';
-    $('toolPredText').style.fontSize = '2.5rem';
-    $('toolRateText').style.color = '#b8281e';
-    
-    if (e.message && e.message.includes("ĐỒ NGU")) {
-        toast(e.message, 'err');
-    } else {
-        toast('Không có Server kết nối!', 'err');
-    }
-    clearInterval(predTimer);
-  }
-}
-
-function startSpin() {
-  const predText = $('toolPredText');
-  const rateText = $('toolRateText');
-  const circleSvg = $('toolCircleSvg');
-  const circleBar = $('toolCircle');
-  
-  predText.textContent = '...';
-  predText.className = 'pred-text spinner';
-  rateText.textContent = 'ĐANG PHÂN TÍCH';
-  
-  circleBar.style.transition = 'none';
-  circleBar.style.strokeDashoffset = 785; 
-  
-  let deg = 0;
-  const spinInterval = setInterval(() => {
-    if (!isSpinning) {
-      clearInterval(spinInterval);
-      predText.classList.remove('spinner');
-      circleSvg.style.transform = 'rotate(-90deg)'; 
-      return;
-    }
-    deg += 10;
-    circleSvg.style.transform = `rotate(${deg}deg)`;
-  }, 50);
-}
-
-function renderTool(d) {
-  const predText = $('toolPredText');
-  const rateText = $('toolRateText');
-  const circle = $('toolCircle');
-  const historyBody = $('historyBody');
-
-  let pred = d.du_doan || '--';
-  let conf = d.tin_cay || 0;
-
-  // Reset lại style nếu trước đó bị lỗi
-  predText.style.color = '';
-  predText.style.fontSize = '';
-
-  circle.style.transition = 'stroke-dashoffset 1s ease-in-out';
-  predText.textContent = pred;
-  predText.className = 'pred-text ' + (pred === 'TÀI' || pred === 'BIG' ? 'tai' : '');
-  rateText.textContent = conf + '%';
-  
-  const offset = 785 - (785 * Math.min(conf, 100) / 100);
-  circle.style.strokeDashoffset = offset;
-
-  if (d.history && Array.isArray(d.history)) {
-    historyBody.innerHTML = '';
-    d.history.forEach(item => {
-      const tr = document.createElement('tr');
-      
-      let badgeCls = (item.du_doan === 'TÀI' || item.du_doan === 'BIG') ? 'badge t' : 'badge x';
-      let resultHtml = `<span class="result-wait">...</span>`;
-      let evalHtml = `<span class="result-wait">...</span>`;
-
-      if (item.ket_qua) {
-        let actualCls = (item.ket_qua === 'TÀI' || item.ket_qua === 'BIG') ? 'badge t' : 'badge x';
-        resultHtml = `<span class="${actualCls}">${item.ket_qua}</span>`;
-        evalHtml = item.danh_gia === 'WIN' ? `<span class="result-win">WIN</span>` : `<span class="result-lose">LOSE</span>`;
-      }
-
-      tr.innerHTML = `
-        <td>#${item.phien}</td>
-        <td><span class="${badgeCls}">${item.du_doan}</span></td>
-        <td>${resultHtml}</td>
-        <td>${evalHtml}</td>
-      `;
-      historyBody.appendChild(tr);
-    });
-  }
-}
-
-// Khởi tạo ban đầu
 if (localStorage.getItem('kairo_key')) {
-  $('viewHome').style.display = 'none';
-  $('viewKho').classList.add('active');
-  loadGames();
+  window.location.href = '/kho.html';
 }
-
-// MATRIX RAIN (Lược bớt phần vẽ canvas cho gọn)
 </script>
 </body>
 </html>
