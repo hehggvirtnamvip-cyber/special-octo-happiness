@@ -11,8 +11,63 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Orbitron:wght@600;800;900&family=Inter:wght@400;500;600;700;800&family=Caveat:wght@600;700&family=Kalam:wght@300;400;700&family=Patrick+Hand&display=swap" rel="stylesheet">
+
+<!-- ==================== BẢO MẬT CHỐNG DEVTOOLS & CRACK ==================== -->
+<script>
+(function() {
+    // 1. Chặn menu chuột phải (Inspect Element)
+    document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+
+    // 2. Chặn các phím tắt mở DevTools
+    document.addEventListener('keydown', function(e) {
+        // Chặn F12
+        if (e.key === 'F12' || e.keyCode === 123) {
+            e.preventDefault();
+            return false;
+        }
+        // Chặn Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C
+        if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C' || e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) {
+            e.preventDefault();
+            return false;
+        }
+        // Chặn Ctrl+U (Xem mã nguồn)
+        if (e.ctrlKey && (e.key === 'U' || e.keyCode === 85)) {
+            e.preventDefault();
+            return false;
+        }
+    });
+
+    // 3. Phát hiện nếu DevTools đang mở (dựa vào sự thay đổi kích thước cửa sổ / console)
+    let devtoolsOpen = false;
+    const element = new Image();
+    Object.defineProperty(element, 'id', {
+        get: function() {
+            devtoolsOpen = true;
+            // Nếu phát hiện mở, hiện cảnh báo và treo trang
+            document.body.innerHTML = "<div style='display:flex;justify-content:center;align-items:center;height:100vh;background:#0b1120;color:#ef4444;font-family:sans-serif;font-size:22px;font-weight:bold;text-align:center;padding:20px;line-height:1.6;'>PHÁT HIỆN HACK!<br>ĐỒ NGU ÓC CẶC ĐÒI CRACK TOOL HẢ?<br><br>VUI LÒNG TẮT DEVTOOLS / APP EXT ĐỂ TIẾP TỤC!</div>";
+            throw new Error("DevTools Detected");
+        }
+    });
+
+    // Kích hoạt bẫy (Kiểm tra định kỳ 1 giây 1 lần)
+    setInterval(() => {
+        devtoolsOpen = false;
+        console.log(element); // Thao tác này sẽ kích hoạt getter ở trên nếu DevTools đang mở
+        console.clear(); // Xóa sạch log để không ai xem được
+    }, 1000);
+
+    // 4. Chặn bôi đen (Copy code)
+    document.addEventListener('selectstart', function(e) {
+        e.preventDefault();
+    });
+})();
+</script>
+<!-- ======================================================================= -->
+
 <style>
-/* ================= CSS TRANG CHỦ (GIỮ NGUYÊN) ================= */
+/* ================= CSS TRANG CHỦ ================= */
 * { margin:0; padding:0; box-sizing:border-box; }
 :root{
   --bg1:#03050a; --bg2:#0a0f1c; --bg3:#0d1220;
@@ -674,7 +729,6 @@ async function fetchPrediction(isFirst) {
     console.log("Lỗi API:", e.message);
     
     if (retryCount < 5) { // Thử lại tối đa 5 lần (khoảng 25 giây)
-        // Thử tự động lấy lại danh sách game (token mới) nếu bị lỗi
         retryCount++;
         console.log(`Thử lại lần ${retryCount}...`);
         
@@ -695,8 +749,8 @@ async function fetchPrediction(isFirst) {
             }
         } catch (errG) {}
         
-        // Đợi 2 giây rồi gọi lại API
-        setTimeout(() => fetchPrediction(false), 5000); // Tăng thời gian chờ lên 5s cho Render khởi động
+        // Đợi 5 giây rồi gọi lại API (chờ server Render khởi động)
+        setTimeout(() => fetchPrediction(false), 5000);
         return;
     }
 
