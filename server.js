@@ -10,7 +10,6 @@ const https = require('https');
 const BOT_TOKEN = process.env.TELEGRAM_TOKEN || "9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA";
 const ADMIN_ID = 7757046138;
 const ADMIN_USER = "tranhoang2286";
-const NOTIFY_CHAT = -1001234567890;
 
 const BANK_CODE = "BIDV";
 const BANK_ACC = "96247V4IWI";
@@ -20,15 +19,15 @@ const API_BANK = "https://reimagined-spork-bu28.onrender.com/lich-su";
 const PORT = process.env.PORT || 8000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
-const SECRET_KEY = 'hoangtool-secret-2026-DO-NOT-SHARE-CHANGE-ME';
+const SECRET_KEY = 'kairo-secret-2026-DO-NOT-SHARE-CHANGE-ME';
 const TOKEN_ROTATE_MS = 3600000;
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// API THẬT BỊ ẨN BẰNG BASE64
-const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01";
-const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q";
-const _k3 = "c29uLXByZWRpY3Qv";
+// API THẬT BỊ ẨN BẰNG BASE64 (Bảo mật tuyệt đối)
+const _k1 = "aHR0cHM6Ly9nYW1lLWxvbi01"; // https://game-lon-5
+const _k2 = "c2tzLm9ucmVuZGVyLmNvbS9q"; // sks.onrender.com/j
+const _k3 = "c29uLXByZWRpY3Qv"; // son-predict/
 const API_GAME_RAW = {
   md5: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9tZDU=").toString('ascii'), 
   hu: Buffer.from(_k1 + _k2 + _k3 + "bGM3OS9odQ==").toString('ascii'), 
@@ -52,7 +51,7 @@ const pool = new Pool({
 });
 
 async function initDB() {
-  if (!DATABASE_URL) return;
+  if (!DATABASE_URL) return console.error("❌ THIẾU DATABASE_URL!");
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, plan TEXT NOT NULL, duration_days INTEGER, created_at DOUBLE PRECISION NOT NULL, activated_at DOUBLE PRECISION, expires_at DOUBLE PRECISION, is_active INTEGER DEFAULT 0);
@@ -99,7 +98,7 @@ function tokenToGame(t) { if (TOKEN_MAP[t]) return TOKEN_MAP[t]; const prevBucke
 function gameToToken(g) { for (const [t, k] of Object.entries(TOKEN_MAP)) if (k === g) return t; return null; }
 rebuildTokenMap();
 
-// ========== WEB SERVER ==========
+// ========== WEB SERVER & API ==========
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
@@ -139,6 +138,7 @@ app.get('/api/predict/:token', async (req, res) => {
 
   const gameId = tokenToGame(req.params.token);
   
+  // BẪY CRACK
   if (!gameId) {
     return res.status(403).json({ error: "ĐỒ NGU + ÓC CẶC CŨNG ĐÒI CRACK. TOOL NÀY KHÔNG CÓ SERVER ĐỂ CHẠY ĐÂU!" });
   }
@@ -182,7 +182,6 @@ app.get('/api/predict/:token', async (req, res) => {
 
     res.json({ phien, du_doan, tin_cay, history: historyArr });
   } catch (e) {
-    console.error(e.message);
     res.status(502).json({ error: "MẤT KẾT NỐI SERVER. KHÔNG CÓ DỮ LIỆU ĐỂ DỰ ĐOÁN!" });
   }
 });
@@ -236,7 +235,7 @@ async function showStart(chatId, user) {
       ]
     }
   };
-  await bot.sendMessage(chatId, `🦁 <b>HOÀNG TOOL</b>\nChào <b>${user.first_name}</b>!\n\n💰 <b>BẢNG GIÁ KEY</b>\n• 20k → 1 ngày\n• 30k → 4 ngày\n• 60k → 1 tuần\n• 120k → 1 tháng\n• 150k → 3 tháng\n• 220k → Vĩnh viễn\n\n👇 Chọn thao tác`, opts).catch(()=>{});
+  await bot.sendMessage(chatId, `🦁 <b>KAIRO TOOL</b>\nChào <b>${user.first_name}</b>!\n\n💰 <b>BẢNG GIÁ KEY</b>\n• 20k → 1 ngày\n• 30k → 4 ngày\n• 60k → 1 tuần\n• 120k → 1 tháng\n• 150k → 3 tháng\n• 220k → Vĩnh viễn\n\n👇 Chọn thao tác`, opts).catch(()=>{});
 }
 
 if (bot) {
