@@ -2,6 +2,7 @@
  * KAIRO TOOL - Backend Server
  * Node.js / Express / PostgreSQL / Telegram Bot
  * Refactored: Security + Reliability Edition
+ * Config: Admin ID & Username được điền sẵn.
  */
 
 'use strict';
@@ -15,11 +16,13 @@ const { Pool } = require('pg');
 const TelegramBot = require('node-telegram-bot-api');
 
 // ============================================================
-// CONFIG
+// CONFIG (ĐÃ CẬP NHẬT THEO THÔNG TIN CỦA BẠN)
 // ============================================================
+// Khuyên dùng biến môi trường (process.env.TELEGRAM_TOKEN) để bảo mật.
+// Nếu chưa set env, nó sẽ dùng token bạn vừa đưa.
 const BOT_TOKEN   = process.env.TELEGRAM_TOKEN || '9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA';
 const ADMIN_ID    = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : 7757046138;
-const ADMIN_USER  = (process.env.ADMIN_USER || '@tranhoang2286').toLowerCase();
+const ADMIN_USER  = (process.env.ADMIN_USER || 'tranhoang2286').toLowerCase();
 
 const BANK_CODE   = 'BIDV';
 const BANK_ACC    = '96247V4IWI';
@@ -31,7 +34,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 // SECRET_KEY: BẮT BUỘC trên production
 const SECRET_KEY      = process.env.SECRET_KEY || crypto.randomBytes(32).toString('hex');
-const SECRET_KEY_PREV = process.env.SECRET_KEY_PREV || ''; // hỗ trợ rotate
+const SECRET_KEY_PREV = process.env.SECRET_KEY_PREV || ''; 
 if (!process.env.SECRET_KEY) {
   console.warn('⚠️  SECRET_KEY chưa set env — token sẽ mất khi restart server!');
 }
@@ -119,14 +122,13 @@ async function initDB() {
 initDB();
 
 // ============================================================
-// PREDICT SICBO — Refactored
+// PREDICT SICBO
 // ============================================================
 function predictSicbo(history) {
   if (!Array.isArray(history) || history.length < 3) {
     return { du_doan: 'TÀI', tin_cay: 55 };
   }
 
-  // Chuẩn hóa: mới nhất ở index 0 → đảo thành [cũ ... mới]
   const recent = history
     .slice(0, 15)
     .map(h => Number(h.resultType))
@@ -138,7 +140,6 @@ function predictSicbo(history) {
   const taiCount = recent.filter(v => v === 1).length;
   const xiuCount = recent.length - taiCount;
 
-  // Đếm streak ở cuối (mới nhất)
   let streak = 1;
   for (let i = recent.length - 1; i > 0; i--) {
     if (recent[i] === recent[i - 1]) streak++;
@@ -150,15 +151,12 @@ function predictSicbo(history) {
   let confidence = 0;
 
   if (streak >= 5) {
-    // Cầu quá dài → theo cầu (không bẻ)
     predict = last === 1 ? 'TÀI' : 'XỈU';
-    confidence = 65 + Math.min(streak * 2, 15); // max 80
+    confidence = 65 + Math.min(streak * 2, 15); 
   } else if (streak === 3 || streak === 4) {
-    // Bẻ cầu 1-1
     predict = last === 1 ? 'XỈU' : 'TÀI';
     confidence = 60 + streak * 2;
   } else if (recent.length >= 4) {
-    // Cầu 1-1 (alternating)
     const a = recent[recent.length - 1];
     const b = recent[recent.length - 2];
     const c = recent[recent.length - 3];
@@ -167,14 +165,12 @@ function predictSicbo(history) {
       predict = a === 1 ? 'XỈU' : 'TÀI';
       confidence = 65;
     }
-    // Cầu 1-1-2
     else if (c === d && a === b && a !== c) {
       predict = a === 1 ? 'XỈU' : 'TÀI';
       confidence = 60;
     }
   }
 
-  // Fallback: đa số + random tie-break
   if (!predict) {
     if (taiCount === xiuCount) {
       predict = crypto.randomInt(0, 2) === 1 ? 'TÀI' : 'XỈU';
@@ -190,7 +186,7 @@ function predictSicbo(history) {
 }
 
 // ============================================================
-// TOKEN ROTATION (HMAC-based, hỗ trợ SECRET_KEY_PREV)
+// TOKEN ROTATION
 // ============================================================
 let TOKEN_MAP = {};
 let TOKEN_MAP_PREV = {};
@@ -219,7 +215,6 @@ function rebuildTokenMap() {
     if (SECRET_KEY_PREV) {
       TOKEN_MAP[signWith(game, bucket, SECRET_KEY_PREV)] = game;
     }
-    // Token của bucket trước (grace period)
     TOKEN_MAP_PREV[signWith(game, bucket - 1, SECRET_KEY)] = game;
     if (SECRET_KEY_PREV) {
       TOKEN_MAP_PREV[signWith(game, bucket - 1, SECRET_KEY_PREV)] = game;
@@ -244,7 +239,7 @@ function gameToToken(game) {
 rebuildTokenMap();
 
 // ============================================================
-// RATE LIMITER (với cleanup định kỳ)
+// RATE LIMITER
 // ============================================================
 const RATE_BUCKETS = new Map();
 
@@ -273,7 +268,6 @@ function rateLimit(max = RATE_LIMIT_MAX, windowMs = RATE_LIMIT_WINDOW_MS) {
   };
 }
 
-// Dọn bucket quá hạn mỗi 5 phút (chống memory leak)
 setInterval(() => {
   const now = Date.now();
   for (const [ip, rec] of RATE_BUCKETS.entries()) {
@@ -282,9 +276,9 @@ setInterval(() => {
 }, 5 * 60_000).unref();
 
 // ============================================================
-// CIRCUIT BREAKER cho API bên thứ 3
+// CIRCUIT BREAKER
 // ============================================================
-const CIRCUIT = new Map(); // gameId -> { fails, openUntil }
+const CIRCUIT = new Map();
 
 function circuitOpen(gameId) {
   const c = CIRCUIT.get(gameId);
@@ -323,7 +317,6 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/index.html', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/kho.html', (req, res) => res.sendFile(path.join(__dirname, 'kho.html')));
 
-// Middleware xác thực key
 async function requireValidKey(req, res, next) {
   try {
     let rawKey = req.headers['x-kairo-key'];
@@ -353,7 +346,6 @@ async function requireValidKey(req, res, next) {
   }
 }
 
-// Runtime history cho sicbo
 const RUNTIME_HISTORY = { md5: [], hu: [], luckywin: [], sumclub: [] };
 
 // ============================================================
@@ -382,7 +374,6 @@ app.get('/api/games', rateLimit(), requireValidKey, (req, res) => {
   });
 });
 
-// Helper: gọi API gốc có retry + timeout
 async function fetchGameApi(gameId) {
   const url = API_GAME_RAW[gameId];
   let lastErr;
@@ -475,7 +466,6 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
     circuitFail(gameId);
     console.error(`[predict ${gameId}]`, e.message);
 
-    // KHÔNG ghi kết quả giả vào history — chỉ trả trạng thái bảo trì
     return res.json({
       phien: '',
       du_doan: '',
@@ -503,7 +493,6 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
 
     if (row.activated_at == null) {
       const finalExp = row.duration_days == null ? null : nowSec + row.duration_days * 86400;
-      // Atomic update: chỉ set nếu activated_at vẫn null (chống race)
       const upd = await pool.query(
         `UPDATE keys SET activated_at = $1, expires_at = $2, is_active = 1
          WHERE key = $3 AND activated_at IS NULL`,
@@ -557,7 +546,6 @@ if (!BOT_TOKEN) {
   }
 }
 
-// ---------- HELPERS ----------
 const userState = {};
 
 function genKey(plan) {
@@ -572,7 +560,6 @@ function isAdmin(user) {
   return false;
 }
 
-// Safe send helpers
 function safeSend(chatId, text, opts) {
   return bot.sendMessage(chatId, text, opts).catch(e => console.error('sendMessage:', e.message));
 }
@@ -588,7 +575,6 @@ function safeDelete(chatId, msgId) {
   return bot.deleteMessage(chatId, msgId).catch(() => {});
 }
 
-// ---------- UI BUILDERS ----------
 function mainMenuKeyboard(user) {
   const rows = [
     [{ text: '🛒 Mua Key', callback_data: 'buy_menu' }],
@@ -610,7 +596,6 @@ async function showStart(chatId, user) {
   safeSend(chatId, text, { parse_mode: 'HTML', reply_markup: mainMenuKeyboard(user) });
 }
 
-// ---------- ADMIN: XEM & XÓA KEY ----------
 async function showKeyList(chatId, msgId, page = 0) {
   const PAGE_SIZE = 8;
   const offset = page * PAGE_SIZE;
@@ -691,7 +676,6 @@ async function doDeleteKey(chatId, msgId, key) {
   }
 }
 
-// ---------- BOT EVENTS ----------
 if (bot) {
   bot.onText(/\/start/, msg => showStart(msg.chat.id, msg.from));
 
@@ -703,13 +687,10 @@ if (bot) {
       const user   = query.from;
       const hasCaption = !!query.message.caption;
 
-      // ------ START ------
       if (data === 'back_start') {
         safeDelete(chatId, msgId);
         await showStart(chatId, user);
       }
-
-      // ------ BUY ------
       else if (data === 'buy_menu') {
         const rows = Object.entries(PRICES).map(([pid, cfg]) => [
           { text: `💎 ${cfg.label} — ${cfg.price.toLocaleString('vi-VN')}đ`, callback_data: `buy_${pid}` },
@@ -720,7 +701,6 @@ if (bot) {
           reply_markup: { inline_keyboard: rows },
         });
       }
-
       else if (data.startsWith('buy_')) {
         const plan = data.replace('buy_', '');
         const cfg  = PRICES[plan];
@@ -759,8 +739,6 @@ if (bot) {
           safeEdit(chatId, msgId, text, { parse_mode: 'HTML', reply_markup: kb });
         }
       }
-
-      // ------ PAYMENT CHECK ------
       else if (data.startsWith('paid_')) {
         const orderId = data.replace('paid_', '');
         const res = await pool.query(
@@ -828,14 +806,10 @@ if (bot) {
             { parse_mode: 'HTML' });
         }
       }
-
-      // ------ ENTER KEY ------
       else if (data === 'enter_key') {
         userState[user.id] = 'WAITING_KEY';
         safeSend(chatId, '🔑 <b>Nhập key của bạn</b>\n\nGửi key vào chat để kích hoạt.', { parse_mode: 'HTML' });
       }
-
-      // ------ ADMIN PANEL ------
       else if (data === 'admin_panel' && isAdmin(user)) {
         const [totalRes, activeRes, revRes] = await Promise.all([
           pool.query('SELECT COUNT(*) FROM keys').catch(() => ({ rows: [{ count: 0 }] })),
@@ -859,24 +833,18 @@ if (bot) {
             },
           });
       }
-
-      // ------ ADMIN: KEY LIST / DELETE ------
       else if (data.startsWith('keylist_') && isAdmin(user)) {
         const page = parseInt(data.replace('keylist_', ''), 10) || 0;
         await showKeyList(chatId, msgId, page);
       }
-
       else if (data.startsWith('delkey_confirm_') && isAdmin(user)) {
         const key = data.replace('delkey_confirm_', '');
         await confirmDeleteKey(chatId, msgId, key);
       }
-
       else if (data.startsWith('delkey_do_') && isAdmin(user)) {
         const key = data.replace('delkey_do_', '');
         await doDeleteKey(chatId, msgId, key);
       }
-
-      // ------ ADMIN: GENERATE KEY ------
       else if (data === 'admin_genkey' && isAdmin(user)) {
         const rows = Object.entries(PRICES).map(([pid, cfg]) => [
           { text: cfg.label, callback_data: `genkey_${pid}` },
@@ -887,7 +855,6 @@ if (bot) {
           reply_markup: { inline_keyboard: rows },
         });
       }
-
       else if (data.startsWith('genkey_') && isAdmin(user)) {
         const plan = data.replace('genkey_', '');
         const cfg = PRICES[plan];
@@ -917,7 +884,6 @@ if (bot) {
     }
   });
 
-  // ------ TEXT MESSAGE HANDLER (nhập key) ------
   bot.on('message', async msg => {
     try {
       if (!msg.text || msg.text.startsWith('/')) return;
@@ -986,7 +952,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 Web Server running on port ${PORT}`);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down...');
   try { bot?.stopPolling(); } catch {}
