@@ -1,7 +1,7 @@
 /**
- * KAIRO TOOL - Backend Server
+ * KAIRO TOOL - Backend Server (Fixed & Extended Edition)
  * Node.js / Express / PostgreSQL / Telegram Bot
- * Refactored: Security + Reliability Edition
+ * Support: lc79, betvip, b52, hitclub, luckywin, sumclub
  */
 
 'use strict';
@@ -15,15 +15,14 @@ const { Pool } = require('pg');
 const TelegramBot = require('node-telegram-bot-api');
 
 // ============================================================
-// CONFIG
+// CONFIG (giữ nguyên token/admin như yêu cầu)
 // ============================================================
 const BOT_TOKEN   = process.env.TELEGRAM_TOKEN || '9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA';
 const ADMIN_ID    = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : 7757046138;
 const ADMIN_USER  = (process.env.ADMIN_USER || 'tranhoang2286').toLowerCase();
 
-// 👇 ĐIỀN ID KÊNH CỦA BẠN VÀO ĐÂY (Ví dụ: -100123456789)
-// Kênh này phải có Bot của bạn làm Admin thì mới gửi tin nhắn được.
-const NOTIFY_CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID || '-100123456789'; 
+// ⚠️ ĐIỀN ID KÊNH CỦA BẠN (dạng -100xxxxxxxxxx) — bot phải là admin kênh
+const NOTIFY_CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID || '';
 
 const BANK_CODE   = 'BIDV';
 const BANK_ACC    = '96247V4IWI';
@@ -34,12 +33,12 @@ const PORT     = process.env.PORT || 8000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 const SECRET_KEY      = process.env.SECRET_KEY || crypto.randomBytes(32).toString('hex');
-const SECRET_KEY_PREV = process.env.SECRET_KEY_PREV || ''; 
+const SECRET_KEY_PREV = process.env.SECRET_KEY_PREV || '';
 if (!process.env.SECRET_KEY) {
   console.warn('⚠️  SECRET_KEY chưa set env — token sẽ mất khi restart server!');
 }
 
-const TOKEN_ROTATE_MS       = 3_600_000;  // 1 giờ
+const TOKEN_ROTATE_MS       = 3_600_000;
 const RATE_LIMIT_MAX        = 60;
 const RATE_LIMIT_WINDOW_MS  = 60_000;
 const API_TIMEOUT_MS        = 8_000;
@@ -48,13 +47,37 @@ const CIRCUIT_FAIL_THRESH   = 5;
 const CIRCUIT_OPEN_MS       = 30_000;
 
 // ============================================================
-// GAME API MAP
+// GAME API MAP  ← ĐÃ THÊM 6 GAME MỚI
 // ============================================================
 const API_GAME_RAW = {
-  md5:      'https://game-lon-5sks.onrender.com/json-predict/lc79/md5',
-  hu:       'https://game-lon-5sks.onrender.com/json-predict/lc79/hu',
-  luckywin: 'https://game-lon-5sks.onrender.com/json-predict/sicbo/luckywin',
-  sumclub:  'https://game-lon-5sks.onrender.com/json-predict/sicbo/sumclub',
+  // LC79 (cũ)
+  md5:         'https://game-lon-5sks.onrender.com/json-predict/lc79/md5',
+  hu:          'https://game-lon-5sks.onrender.com/json-predict/lc79/hu',
+
+  // BetVIP
+  betvip_hu:   'https://game-lon-5sks.onrender.com/json-predict/betvip/hu',
+  betvip_md5:  'https://game-lon-5sks.onrender.com/json-predict/betvip/md5',
+
+  // B52
+  b52_hu:      'https://game-lon-5sks.onrender.com/json-predict/b52/hu',
+  b52_md5:     'https://game-lon-5sks.onrender.com/json-predict/b52/md5',
+
+  // HitClub
+  hitclub_hu:  'https://game-lon-5sks.onrender.com/json-predict/hitclub/hu',
+  hitclub_md5: 'https://game-lon-5sks.onrender.com/json-predict/hitclub/md5',
+
+  // Sicbo
+  luckywin:    'https://game-lon-5sks.onrender.com/json-predict/sicbo/luckywin',
+  sumclub:     'https://game-lon-5sks.onrender.com/json-predict/sicbo/sumclub',
+};
+
+// Phân loại game để router xử lý đúng
+const GAME_TYPE = {
+  md5: 'md5hu', hu: 'md5hu',
+  betvip_hu: 'md5hu', betvip_md5: 'md5hu',
+  b52_hu: 'md5hu',    b52_md5: 'md5hu',
+  hitclub_hu: 'md5hu', hitclub_md5: 'md5hu',
+  luckywin: 'sicbo', sumclub: 'sicbo',
 };
 
 const PRICES = {
@@ -152,7 +175,7 @@ function predictSicbo(history) {
 
   if (streak >= 5) {
     predict = last === 1 ? 'TÀI' : 'XỈU';
-    confidence = 65 + Math.min(streak * 2, 15); 
+    confidence = 65 + Math.min(streak * 2, 15);
   } else if (streak === 3 || streak === 4) {
     predict = last === 1 ? 'XỈU' : 'TÀI';
     confidence = 60 + streak * 2;
@@ -164,8 +187,7 @@ function predictSicbo(history) {
     if (a !== b && b !== c && c !== d) {
       predict = a === 1 ? 'XỈU' : 'TÀI';
       confidence = 65;
-    }
-    else if (c === d && a === b && a !== c) {
+    } else if (c === d && a === b && a !== c) {
       predict = a === 1 ? 'XỈU' : 'TÀI';
       confidence = 60;
     }
@@ -305,6 +327,7 @@ function circuitFail(gameId) {
 // ============================================================
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', 1); // fix rate limit spoof
 app.use(express.json({ limit: '32kb' }));
 
 app.use((req, res, next) => {
@@ -313,6 +336,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/healthz', (_, res) => res.status(200).send('ok'));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/index.html', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/kho.html', (req, res) => res.sendFile(path.join(__dirname, 'kho.html')));
@@ -346,7 +370,14 @@ async function requireValidKey(req, res, next) {
   }
 }
 
-const RUNTIME_HISTORY = { md5: [], hu: [], luckywin: [], sumclub: [] };
+// Runtime history cho game dạng sicbo (cần track win/lose)
+const RUNTIME_HISTORY = {
+  md5: [], hu: [],
+  betvip_hu: [], betvip_md5: [],
+  b52_hu: [], b52_md5: [],
+  hitclub_hu: [], hitclub_md5: [],
+  luckywin: [], sumclub: [],
+};
 
 // ============================================================
 // API ROUTES
@@ -358,10 +389,16 @@ app.get('/api/key/verify', rateLimit(), requireValidKey, (req, res) => {
 app.get('/api/games', rateLimit(), requireValidKey, (req, res) => {
   rebuildTokenMap();
   const meta = {
-    md5:      { name: 'LC79 MD5',        icon: 'fa-fingerprint', tagline: 'Phân tích mã băm',              badge: 'V3'  },
-    hu:       { name: 'LC79 Hũ',         icon: 'fa-coins',       tagline: 'Dự đoán realtime',              badge: 'V3'  },
-    luckywin: { name: 'Sicbo LuckyWin',  icon: 'fa-dice',        tagline: 'Thuật toán Sicbo độc quyền',    badge: 'PRO' },
-    sumclub:  { name: 'Sicbo SumClub',   icon: 'fa-dice-d6',     tagline: 'Thuật toán Sicbo độc quyền',    badge: 'PRO' },
+    md5:         { name: 'LC79 MD5',        icon: 'fa-fingerprint', tagline: 'Phân tích mã băm',           badge: 'V3'  },
+    hu:          { name: 'LC79 Hũ',         icon: 'fa-coins',       tagline: 'Dự đoán realtime',           badge: 'V3'  },
+    betvip_hu:   { name: 'BetVIP Hũ',       icon: 'fa-coins',       tagline: 'Dự đoán realtime',           badge: 'NEW' },
+    betvip_md5:  { name: 'BetVIP MD5',      icon: 'fa-fingerprint', tagline: 'Phân tích mã băm',           badge: 'NEW' },
+    b52_hu:      { name: 'B52 Hũ',          icon: 'fa-coins',       tagline: 'Dự đoán realtime',           badge: 'NEW' },
+    b52_md5:     { name: 'B52 MD5',         icon: 'fa-fingerprint', tagline: 'Phân tích mã băm',           badge: 'NEW' },
+    hitclub_hu:  { name: 'HitClub Hũ',      icon: 'fa-coins',       tagline: 'Dự đoán realtime',           badge: 'NEW' },
+    hitclub_md5: { name: 'HitClub MD5',     icon: 'fa-fingerprint', tagline: 'Phân tích mã băm',           badge: 'NEW' },
+    luckywin:    { name: 'Sicbo LuckyWin',  icon: 'fa-dice',        tagline: 'Thuật toán Sicbo độc quyền', badge: 'PRO' },
+    sumclub:     { name: 'Sicbo SumClub',   icon: 'fa-dice-d6',     tagline: 'Thuật toán Sicbo độc quyền', badge: 'PRO' },
   };
   const games = [];
   for (const [k, m] of Object.entries(meta)) {
@@ -396,6 +433,17 @@ async function fetchGameApi(gameId) {
   throw lastErr;
 }
 
+// Cache 3s để giảm tải upstream
+const PREDICT_CACHE = new Map();
+function getCached(gameId) {
+  const c = PREDICT_CACHE.get(gameId);
+  if (c && Date.now() < c.exp) return c.data;
+  return null;
+}
+function setCache(gameId, data, ttl = 3000) {
+  PREDICT_CACHE.set(gameId, { data, exp: Date.now() + ttl });
+}
+
 app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) => {
   rebuildTokenMap();
 
@@ -403,6 +451,10 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
   if (!gameId) {
     return res.status(403).json({ error: 'Token không hợp lệ hoặc đã hết hạn' });
   }
+
+  // Cache hit
+  const cached = getCached(gameId);
+  if (cached) return res.json(cached);
 
   if (circuitOpen(gameId)) {
     return res.status(503).json({
@@ -416,12 +468,13 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
     const raw = (await fetchGameApi(gameId)) || {};
     circuitSuccess(gameId);
 
+    const type = GAME_TYPE[gameId] || 'sicbo';
     let data = {};
 
-    if (gameId === 'md5' || gameId === 'hu') {
-      const phien     = String(raw.phien_hien_tai || '');
-      const du_doan   = String(raw.du_doan || '').toUpperCase();
-      const tin_cay   = parseInt(raw.do_tin_cay, 10) || 50;
+    if (type === 'md5hu') {
+      const phien   = String(raw.phien_hien_tai || '');
+      const du_doan = String(raw.du_doan || '').toUpperCase();
+      const tin_cay = parseInt(raw.do_tin_cay, 10) || 50;
 
       const historyArr = [];
       if (Array.isArray(raw.lossHistory)) {
@@ -439,6 +492,7 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
 
       data = { phien, du_doan, tin_cay, status: 'LIVE', history: historyArr.slice(0, 20) };
     } else {
+      // sicbo
       const history = Array.isArray(raw) ? raw : (raw.data || []);
       if (!Array.isArray(history) || history.length === 0) {
         throw new Error('API trả dữ liệu rỗng');
@@ -461,6 +515,7 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
       data.history = historyArr;
     }
 
+    setCache(gameId, data, 3000);
     return res.json(data);
   } catch (e) {
     circuitFail(gameId);
@@ -680,6 +735,13 @@ if (bot) {
   bot.onText(/\/start/, msg => showStart(msg.chat.id, msg.from));
 
   bot.on('callback_query', async query => {
+    let answered = false;
+    const answer = (text, alert = false) => {
+      if (answered) return;
+      answered = true;
+      bot.answerCallbackQuery(query.id, { text, show_alert: alert }).catch(() => {});
+    };
+
     try {
       const chatId = query.message.chat.id;
       const msgId  = query.message.message_id;
@@ -704,7 +766,7 @@ if (bot) {
       else if (data.startsWith('buy_')) {
         const plan = data.replace('buy_', '');
         const cfg  = PRICES[plan];
-        if (!cfg) return;
+        if (!cfg) return answer('Gói không tồn tại', true);
 
         const orderId = crypto.randomBytes(4).toString('hex').toUpperCase();
         const content = `HT${orderId}`;
@@ -741,24 +803,35 @@ if (bot) {
       }
       else if (data.startsWith('paid_')) {
         const orderId = data.replace('paid_', '');
-        const res = await pool.query(
-          'SELECT plan, amount, content, status FROM orders WHERE id=$1',
+
+        // 🔒 Atomic claim: chỉ 1 callback được xử lý
+        const claim = await pool.query(
+          `UPDATE orders SET status='processing'
+           WHERE id=$1 AND status='pending'
+           RETURNING plan, amount, content`,
           [orderId]
-        ).catch(() => ({ rows: [] }));
-        const order = res.rows[0];
-        if (!order || order.status === 'paid') {
-          return bot.answerCallbackQuery(query.id, { text: 'Đơn không tồn tại hoặc đã xử lý', show_alert: true }).catch(() => {});
+        ).catch(() => ({ rowCount: 0, rows: [] }));
+
+        if (claim.rowCount === 0) {
+          // Đã xử lý hoặc không tồn tại
+          const check = await pool.query('SELECT status, key_issued FROM orders WHERE id=$1', [orderId]).catch(() => ({ rows: [] }));
+          const o = check.rows[0];
+          if (o && o.status === 'paid' && o.key_issued) {
+            return answer(`Đơn đã xử lý. Key: ${o.key_issued}`, true);
+          }
+          return answer('Đơn không tồn tại hoặc đã xử lý', true);
         }
 
-        const baseCaption = hasCaption ? query.message.caption.split('⏳')[0].trim() : '⏳ Đang kiểm tra giao dịch...';
-        if (hasCaption) {
+        const order = claim.rows[0];
+        const baseCaption = hasCaption ? (query.message.caption || '').split('⏳')[0].trim() : '';
+        if (hasCaption && baseCaption) {
           safeEditCaption(chatId, msgId, baseCaption + '\n\n⏳ <b>Đang kiểm tra giao dịch...</b>', { parse_mode: 'HTML' });
         }
 
         let tx = null;
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 3; i++) {
           try {
-            const r = await axios.get(API_BANK, { timeout: API_TIMEOUT_MS });
+            const r = await axios.get(API_BANK, { timeout: 6000 });
             const txs = Array.isArray(r.data) ? r.data : (r.data.data || r.data.transactions || []);
             tx = txs.find(t =>
               t.content && t.content.toUpperCase().includes(order.content.toUpperCase()) &&
@@ -766,11 +839,13 @@ if (bot) {
             );
             if (tx) break;
           } catch { /* ignore */ }
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 1500));
         }
 
         if (!tx) {
-          const msg = baseCaption + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!</b>\nBot chưa thấy giao dịch khớp.';
+          // Rollback status
+          await pool.query(`UPDATE orders SET status='pending' WHERE id=$1 AND status='processing'`, [orderId]).catch(() => {});
+          const msg = (baseCaption || '🧾 Đơn hàng') + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!</b>\nBot chưa thấy giao dịch khớp.';
           const kb = {
             inline_keyboard: [
               [{ text: '🔄 Kiểm tra lại', callback_data: `paid_${orderId}` }],
@@ -779,14 +854,13 @@ if (bot) {
           };
           if (hasCaption) safeEditCaption(chatId, msgId, msg, { parse_mode: 'HTML', reply_markup: kb });
           else safeEdit(chatId, msgId, msg, { parse_mode: 'HTML', reply_markup: kb });
-          return;
+          return answer('Chưa thấy giao dịch');
         }
 
         // --- THANH TOÁN THÀNH CÔNG ---
         const key = genKey(order.plan);
         const cfg = PRICES[order.plan];
-        
-        // 1. Cập nhật Database
+
         await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4',
           ['paid', Date.now() / 1000, key, orderId]).catch(() => {});
         await pool.query(
@@ -794,23 +868,19 @@ if (bot) {
           [key, order.plan, cfg.days, Date.now() / 1000]
         ).catch(() => {});
 
-        // 2. Gửi tin nhắn thông báo thành công cho User (Gửi tin nhắn mới để chắc chắn user nhận được)
         const successText =
           `✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n` +
           `🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n` +
           `📦 Gói: <b>${cfg.label}</b>\n\n` +
           `⚠️ Key chỉ kích hoạt được 1 lần.\nNhập lại <b>KHÔNG cộng thêm</b> thời gian.`;
-        
-        // Cập nhật lại bill thanh toán
+
         if (hasCaption) safeEditCaption(chatId, msgId, successText, { parse_mode: 'HTML' });
         else safeEdit(chatId, msgId, successText, { parse_mode: 'HTML' });
 
-        // Gửi thêm 1 tin nhắn riêng để đảm bảo user nhận được key
         safeSend(chatId, `🔑 <b>KEY CỦA BẠN ĐÂY:</b>\n<code>${key}</code>\n\nHãy copy và nhấn "Nhập Key" để kích hoạt!`, { parse_mode: 'HTML' });
 
-        // 3. Gửi thông báo lên Kênh (Channel) mà Bot đang làm Admin
-        if (NOTIFY_CHANNEL_ID && NOTIFY_CHANNEL_ID !== '-100123456789') {
-          const channelMsg = 
+        if (NOTIFY_CHANNEL_ID) {
+          const channelMsg =
             `🎉 <b>CÓ NGƯỜI VỪA MUA KEY!</b>\n\n` +
             `👤 Khách hàng: <b>${user.first_name || 'Ẩn danh'}</b>\n` +
             `📦 Gói: <b>${cfg.label}</b>\n` +
@@ -819,13 +889,14 @@ if (bot) {
           safeSend(NOTIFY_CHANNEL_ID, channelMsg, { parse_mode: 'HTML' });
         }
 
-        // 4. Gửi thông báo cho Admin
         if (ADMIN_ID) {
           safeSend(ADMIN_ID,
             `💰 <b>ĐƠN MỚI</b>\nUser: ${user.first_name} (@${user.username || 'no_username'})\n` +
             `Gói: ${cfg.label}\nKey: <code>${key}</code>`,
             { parse_mode: 'HTML' });
         }
+
+        return answer('Thanh toán thành công!');
       }
       else if (data === 'enter_key') {
         userState[user.id] = 'WAITING_KEY';
@@ -879,7 +950,7 @@ if (bot) {
       else if (data.startsWith('genkey_') && isAdmin(user)) {
         const plan = data.replace('genkey_', '');
         const cfg = PRICES[plan];
-        if (!cfg) return;
+        if (!cfg) return answer('Gói không tồn tại', true);
         const key = genKey(plan);
         await pool.query(
           'INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)',
@@ -898,10 +969,10 @@ if (bot) {
           });
       }
 
-      bot.answerCallbackQuery(query.id).catch(() => {});
+      answer();
     } catch (e) {
       console.error('callback_query:', e.message);
-      bot.answerCallbackQuery(query.id, { text: 'Có lỗi xảy ra' }).catch(() => {});
+      answer('Có lỗi xảy ra', true);
     }
   });
 
@@ -972,6 +1043,9 @@ if (bot) {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 Web Server running on port ${PORT}`);
 });
+
+process.on('unhandledRejection', err => console.error('UnhandledRejection:', err));
+process.on('uncaughtException', err => console.error('UncaughtException:', err));
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down...');
