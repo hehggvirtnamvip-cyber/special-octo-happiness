@@ -1,7 +1,6 @@
 /**
  * KAIRO TOOL - Backend Server (Fixed & Extended Edition + Device Lock)
  * Node.js / Express / PostgreSQL / Telegram Bot
- * Support: lc79, betvip, b52, hitclub, luckywin, sumclub
  */
 
 'use strict';
@@ -15,13 +14,11 @@ const { Pool } = require('pg');
 const TelegramBot = require('node-telegram-bot-api');
 
 // ============================================================
-// CONFIG (giữ nguyên token/admin như yêu cầu)
+// CONFIG
 // ============================================================
 const BOT_TOKEN   = process.env.TELEGRAM_TOKEN || '9027713238:AAEic04yZItSl5UhnNnXGDz_0kAnlreElVA';
 const ADMIN_ID    = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : 7757046138;
 const ADMIN_USER  = (process.env.ADMIN_USER || 'tranhoang2286').toLowerCase();
-
-// ⚠️ ĐIỀN ID KÊNH CỦA BẠN (dạng -100xxxxxxxxxx) — bot phải là admin kênh
 const NOTIFY_CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID || '';
 
 const BANK_CODE   = 'BIDV';
@@ -34,9 +31,6 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 const SECRET_KEY      = process.env.SECRET_KEY || crypto.randomBytes(32).toString('hex');
 const SECRET_KEY_PREV = process.env.SECRET_KEY_PREV || '';
-if (!process.env.SECRET_KEY) {
-  console.warn('⚠️  SECRET_KEY chưa set env — token sẽ mất khi restart server!');
-}
 
 const TOKEN_ROTATE_MS       = 3_600_000;
 const RATE_LIMIT_MAX        = 60;
@@ -47,31 +41,21 @@ const CIRCUIT_FAIL_THRESH   = 5;
 const CIRCUIT_OPEN_MS       = 30_000;
 
 // ============================================================
-// GAME API MAP  ← ĐÃ THÊM 6 GAME MỚI
+// GAME API MAP
 // ============================================================
 const API_GAME_RAW = {
-  // LC79 (cũ)
   md5:         'https://game-lon-5sks.onrender.com/json-predict/lc79/md5',
   hu:          'https://game-lon-5sks.onrender.com/json-predict/lc79/hu',
-
-  // BetVIP
   betvip_hu:   'https://game-lon-5sks.onrender.com/json-predict/betvip/hu',
   betvip_md5:  'https://game-lon-5sks.onrender.com/json-predict/betvip/md5',
-
-  // B52
   b52_hu:      'https://game-lon-5sks.onrender.com/json-predict/b52/hu',
   b52_md5:     'https://game-lon-5sks.onrender.com/json-predict/b52/md5',
-
-  // HitClub
   hitclub_hu:  'https://game-lon-5sks.onrender.com/json-predict/hitclub/hu',
   hitclub_md5: 'https://game-lon-5sks.onrender.com/json-predict/hitclub/md5',
-
-  // Sicbo
   luckywin:    'https://game-lon-5sks.onrender.com/json-predict/sicbo/luckywin',
   sumclub:     'https://game-lon-5sks.onrender.com/json-predict/sicbo/sumclub',
 };
 
-// Phân loại game để router xử lý đúng
 const GAME_TYPE = {
   md5: 'md5hu', hu: 'md5hu',
   betvip_hu: 'md5hu', betvip_md5: 'md5hu',
@@ -129,7 +113,7 @@ async function initDB() {
       );
     `);
 
-    // Migration: thêm cột nếu bảng đã tồn tại từ trước
+    // Migration an toàn cho DB đang chạy
     await pool.query(`ALTER TABLE keys ADD COLUMN IF NOT EXISTS device_id TEXT`).catch(() => {});
 
     if (!DATABASE_URL && process.env.NODE_ENV !== 'production') {
@@ -138,7 +122,7 @@ async function initDB() {
          VALUES ($1, $2, $3, $4, 0) ON CONFLICT (key) DO NOTHING`,
         ['HT-TEST-2026', 'life', null, Date.now() / 1000]
       );
-      console.log('✅ Local In-Memory DB OK! Test key (dev only): HT-TEST-2026');
+      console.log('✅ Local DB OK! Test key: HT-TEST-2026');
     } else {
       console.log('✅ Database OK!');
     }
@@ -149,180 +133,84 @@ async function initDB() {
 initDB();
 
 // ============================================================
-// PREDICT SICBO
+// PREDICT SICBO & UTILS
 // ============================================================
 function predictSicbo(history) {
-  if (!Array.isArray(history) || history.length < 3) {
-    return { du_doan: 'TÀI', tin_cay: 55 };
-  }
-
-  const recent = history
-    .slice(0, 15)
-    .map(h => Number(h.resultType))
-    .filter(v => v === 0 || v === 1)
-    .reverse();
-
+  if (!Array.isArray(history) || history.length < 3) return { du_doan: 'TÀI', tin_cay: 55 };
+  const recent = history.slice(0, 15).map(h => Number(h.resultType)).filter(v => v === 0 || v === 1).reverse();
   if (recent.length < 3) return { du_doan: 'TÀI', tin_cay: 55 };
-
   const taiCount = recent.filter(v => v === 1).length;
   const xiuCount = recent.length - taiCount;
-
   let streak = 1;
   for (let i = recent.length - 1; i > 0; i--) {
-    if (recent[i] === recent[i - 1]) streak++;
-    else break;
+    if (recent[i] === recent[i - 1]) streak++; else break;
   }
   const last = recent[recent.length - 1];
-
-  let predict = '';
-  let confidence = 0;
-
-  if (streak >= 5) {
-    predict = last === 1 ? 'TÀI' : 'XỈU';
-    confidence = 65 + Math.min(streak * 2, 15);
-  } else if (streak === 3 || streak === 4) {
-    predict = last === 1 ? 'XỈU' : 'TÀI';
-    confidence = 60 + streak * 2;
-  } else if (recent.length >= 4) {
-    const a = recent[recent.length - 1];
-    const b = recent[recent.length - 2];
-    const c = recent[recent.length - 3];
-    const d = recent[recent.length - 4];
-    if (a !== b && b !== c && c !== d) {
-      predict = a === 1 ? 'XỈU' : 'TÀI';
-      confidence = 65;
-    } else if (c === d && a === b && a !== c) {
-      predict = a === 1 ? 'XỈU' : 'TÀI';
-      confidence = 60;
-    }
+  let predict = ''; let confidence = 0;
+  if (streak >= 5) { predict = last === 1 ? 'TÀI' : 'XỈU'; confidence = 65 + Math.min(streak * 2, 15); }
+  else if (streak === 3 || streak === 4) { predict = last === 1 ? 'XỈU' : 'TÀI'; confidence = 60 + streak * 2; }
+  else if (recent.length >= 4) {
+    const a = recent[recent.length - 1], b = recent[recent.length - 2], c = recent[recent.length - 3], d = recent[recent.length - 4];
+    if (a !== b && b !== c && c !== d) { predict = a === 1 ? 'XỈU' : 'TÀI'; confidence = 65; }
+    else if (c === d && a === b && a !== c) { predict = a === 1 ? 'XỈU' : 'TÀI'; confidence = 60; }
   }
-
   if (!predict) {
-    if (taiCount === xiuCount) {
-      predict = crypto.randomInt(0, 2) === 1 ? 'TÀI' : 'XỈU';
-      confidence = 50;
-    } else {
-      predict = taiCount > xiuCount ? 'TÀI' : 'XỈU';
-      confidence = 50 + Math.abs(taiCount - xiuCount) * 2;
-    }
+    if (taiCount === xiuCount) { predict = crypto.randomInt(0, 2) === 1 ? 'TÀI' : 'XỈU'; confidence = 50; }
+    else { predict = taiCount > xiuCount ? 'TÀI' : 'XỈU'; confidence = 50 + Math.abs(taiCount - xiuCount) * 2; }
   }
-
   confidence = Math.min(85, Math.max(50, Math.round(confidence)));
   return { du_doan: predict, tin_cay: confidence };
 }
 
-// ============================================================
-// TOKEN ROTATION
-// ============================================================
-let TOKEN_MAP = {};
-let TOKEN_MAP_PREV = {};
-let CURRENT_BUCKET = -1;
-
+let TOKEN_MAP = {}, TOKEN_MAP_PREV = {}, CURRENT_BUCKET = -1;
 const hourBucket = () => Math.floor(Date.now() / TOKEN_ROTATE_MS);
-
-function signWith(game, bucket, secret) {
-  return crypto
-    .createHmac('sha256', secret)
-    .update(`${game}:${bucket}`)
-    .digest('base64url')
-    .slice(0, 16);
-}
-
+function signWith(game, bucket, secret) { return crypto.createHmac('sha256', secret).update(`${game}:${bucket}`).digest('base64url').slice(0, 16); }
 function rebuildTokenMap() {
   const bucket = hourBucket();
   if (bucket === CURRENT_BUCKET) return;
   CURRENT_BUCKET = bucket;
-
-  TOKEN_MAP = {};
-  TOKEN_MAP_PREV = {};
-
+  TOKEN_MAP = {}; TOKEN_MAP_PREV = {};
   for (const game of Object.keys(API_GAME_RAW)) {
     TOKEN_MAP[signWith(game, bucket, SECRET_KEY)] = game;
-    if (SECRET_KEY_PREV) {
-      TOKEN_MAP[signWith(game, bucket, SECRET_KEY_PREV)] = game;
-    }
+    if (SECRET_KEY_PREV) TOKEN_MAP[signWith(game, bucket, SECRET_KEY_PREV)] = game;
     TOKEN_MAP_PREV[signWith(game, bucket - 1, SECRET_KEY)] = game;
-    if (SECRET_KEY_PREV) {
-      TOKEN_MAP_PREV[signWith(game, bucket - 1, SECRET_KEY_PREV)] = game;
-    }
+    if (SECRET_KEY_PREV) TOKEN_MAP_PREV[signWith(game, bucket - 1, SECRET_KEY_PREV)] = game;
   }
 }
-
 function tokenToGame(token) {
   if (!token) return null;
   if (TOKEN_MAP[token]) return TOKEN_MAP[token];
   if (TOKEN_MAP_PREV[token]) return TOKEN_MAP_PREV[token];
   return null;
 }
-
-function gameToToken(game) {
-  for (const [t, g] of Object.entries(TOKEN_MAP)) {
-    if (g === game) return t;
-  }
-  return null;
-}
-
+function gameToToken(game) { for (const [t, g] of Object.entries(TOKEN_MAP)) { if (g === game) return t; } return null; }
 rebuildTokenMap();
 
-// ============================================================
-// RATE LIMITER
-// ============================================================
 const RATE_BUCKETS = new Map();
-
 function clientIp(req) {
   const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.length > 0) {
-    return xff.split(',')[0].trim();
-  }
+  if (typeof xff === 'string' && xff.length > 0) return xff.split(',')[0].trim();
   return req.socket.remoteAddress || 'unknown';
 }
-
 function rateLimit(max = RATE_LIMIT_MAX, windowMs = RATE_LIMIT_WINDOW_MS) {
   return (req, res, next) => {
-    const ip = clientIp(req);
-    const now = Date.now();
+    const ip = clientIp(req); const now = Date.now();
     let rec = RATE_BUCKETS.get(ip);
-    if (!rec || now > rec.reset) {
-      rec = { count: 0, reset: now + windowMs };
-      RATE_BUCKETS.set(ip, rec);
-    }
+    if (!rec || now > rec.reset) { rec = { count: 0, reset: now + windowMs }; RATE_BUCKETS.set(ip, rec); }
     rec.count++;
-    if (rec.count > max) {
-      return res.status(429).json({ ok: false, error: 'Quá nhiều request, thử lại sau' });
-    }
+    if (rec.count > max) return res.status(429).json({ ok: false, error: 'Quá nhiều request, thử lại sau' });
     next();
   };
 }
+setInterval(() => { const now = Date.now(); for (const [ip, rec] of RATE_BUCKETS.entries()) { if (now > rec.reset) RATE_BUCKETS.delete(ip); } }, 5 * 60_000).unref();
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, rec] of RATE_BUCKETS.entries()) {
-    if (now > rec.reset) RATE_BUCKETS.delete(ip);
-  }
-}, 5 * 60_000).unref();
-
-// ============================================================
-// CIRCUIT BREAKER
-// ============================================================
 const CIRCUIT = new Map();
-
-function circuitOpen(gameId) {
-  const c = CIRCUIT.get(gameId);
-  return c && c.openUntil && Date.now() < c.openUntil;
-}
-
-function circuitSuccess(gameId) {
-  CIRCUIT.set(gameId, { fails: 0, openUntil: 0 });
-}
-
+function circuitOpen(gameId) { const c = CIRCUIT.get(gameId); return c && c.openUntil && Date.now() < c.openUntil; }
+function circuitSuccess(gameId) { CIRCUIT.set(gameId, { fails: 0, openUntil: 0 }); }
 function circuitFail(gameId) {
   const c = CIRCUIT.get(gameId) || { fails: 0, openUntil: 0 };
   c.fails++;
-  if (c.fails >= CIRCUIT_FAIL_THRESH) {
-    c.openUntil = Date.now() + CIRCUIT_OPEN_MS;
-    c.fails = 0;
-    console.warn(`⚡ Circuit OPEN cho ${gameId} trong ${CIRCUIT_OPEN_MS / 1000}s`);
-  }
+  if (c.fails >= CIRCUIT_FAIL_THRESH) { c.openUntil = Date.now() + CIRCUIT_OPEN_MS; c.fails = 0; }
   CIRCUIT.set(gameId, c);
 }
 
@@ -331,12 +219,14 @@ function circuitFail(gameId) {
 // ============================================================
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', 1); // fix rate limit spoof
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '32kb' }));
 
 app.use((req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, x-kairo-key, x-device-id, Authorization');
   next();
 });
 
@@ -346,21 +236,19 @@ app.get('/index.html', (req, res) => res.sendFile(path.join(__dirname, 'index.ht
 app.get('/kho.html', (req, res) => res.sendFile(path.join(__dirname, 'kho.html')));
 
 // ============================================================
-// DEVICE LOCK MIDDLEWARE
+// DEVICE LOCK MIDDLEWARE (Đã fix lỗi lấy sai header)
 // ============================================================
 async function requireValidKey(req, res, next) {
   try {
     let rawKey = req.headers['x-kairo-key'];
-    if (!rawKey && req.headers.authorization?.startsWith('Bearer ')) {
-      rawKey = req.headers.authorization.slice(7);
-    }
+    if (!rawKey && req.headers.authorization?.startsWith('Bearer ')) rawKey = req.headers.authorization.slice(7);
     const key = String(rawKey || '').trim().toUpperCase();
     if (!key) return res.status(401).json({ ok: false, error: 'Thiếu key xác thực' });
 
-    // Lấy device id từ header (frontend tự sinh & lưu localStorage)
-    const deviceId = String(req.headers['x-device-id'] || '').trim();
-    if (!deviceId) {
-      return res.status(400).json({ ok: false, error: 'Thiếu device id (x-device-id)' });
+    // Lấy device_id: Ưu tiên header x-device-id, nếu không có thì fallback về IP
+    let deviceId = req.headers['x-device-id'] || req.headers['x-kairo-device'];
+    if (typeof deviceId !== 'string' || deviceId.trim().length < 5) {
+      deviceId = 'ip_' + clientIp(req).replace(/[^a-zA-Z0-9]/g, '_');
     }
 
     const result = await pool.query(
@@ -368,30 +256,21 @@ async function requireValidKey(req, res, next) {
       [key]
     );
     const row = result.rows[0];
-    if (!row || row.is_active !== 1) {
-      return res.status(401).json({ ok: false, error: 'Key không hợp lệ hoặc chưa kích hoạt' });
-    }
-    const nowSec = Date.now() / 1000;
-    if (row.expires_at != null && nowSec > row.expires_at) {
-      return res.status(401).json({ ok: false, error: 'Key đã hết hạn' });
-    }
+    if (!row || row.is_active !== 1) return res.status(401).json({ ok: false, error: 'Key không hợp lệ hoặc chưa kích hoạt' });
 
-    // ===== KIỂM TRA THIẾT BỊ =====
+    const nowSec = Date.now() / 1000;
+    if (row.expires_at != null && nowSec > row.expires_at) return res.status(401).json({ ok: false, error: 'Key đã hết hạn' });
+
+    // KIỂM TRA THIẾT BỊ
     if (row.device_id == null) {
-      // Gán thiết bị đầu tiên
-      await pool.query(
-        `UPDATE keys SET device_id = $1 WHERE key = $2 AND device_id IS NULL`,
-        [deviceId, key]
-      );
+      await pool.query(`UPDATE keys SET device_id = $1 WHERE key = $2 AND device_id IS NULL`, [deviceId, key]);
       row.device_id = deviceId;
     } else if (row.device_id !== deviceId) {
-      return res.status(403).json({
-        ok: false,
-        error: 'Key đã được sử dụng trên thiết bị khác. Mỗi key chỉ dùng được 1 thiết bị.',
-      });
+      return res.status(403).json({ ok: false, error: 'Key đã được sử dụng trên thiết bị khác. Mỗi key chỉ dùng được 1 thiết bị.' });
     }
 
     req.keyRow = row;
+    req.deviceId = deviceId;
     next();
   } catch (e) {
     console.error('requireValidKey:', e.message);
@@ -399,18 +278,10 @@ async function requireValidKey(req, res, next) {
   }
 }
 
-// Runtime history cho game dạng sicbo (cần track win/lose)
 const RUNTIME_HISTORY = {
-  md5: [], hu: [],
-  betvip_hu: [], betvip_md5: [],
-  b52_hu: [], b52_md5: [],
-  hitclub_hu: [], hitclub_md5: [],
-  luckywin: [], sumclub: [],
+  md5: [], hu: [], betvip_hu: [], betvip_md5: [], b52_hu: [], b52_md5: [], hitclub_hu: [], hitclub_md5: [], luckywin: [], sumclub: [],
 };
 
-// ============================================================
-// API ROUTES
-// ============================================================
 app.get('/api/key/verify', rateLimit(), requireValidKey, (req, res) => {
   res.json({ ok: true, plan: req.keyRow.plan, expires_at: req.keyRow.expires_at });
 });
@@ -434,10 +305,7 @@ app.get('/api/games', rateLimit(), requireValidKey, (req, res) => {
     const t = gameToToken(k);
     if (t) games.push({ id: k, token: t, ...m });
   }
-  res.json({
-    games,
-    expires_in: Math.ceil((TOKEN_ROTATE_MS - (Date.now() % TOKEN_ROTATE_MS)) / 1000),
-  });
+  res.json({ games, expires_in: Math.ceil((TOKEN_ROTATE_MS - (Date.now() % TOKEN_ROTATE_MS)) / 1000) });
 });
 
 async function fetchGameApi(gameId) {
@@ -445,92 +313,52 @@ async function fetchGameApi(gameId) {
   let lastErr;
   for (let attempt = 0; attempt <= API_RETRY; attempt++) {
     try {
-      const r = await axios.get(url, {
-        timeout: API_TIMEOUT_MS,
-        headers: { 'User-Agent': 'Mozilla/5.0 (KairoTool)' },
-        validateStatus: s => s >= 200 && s < 500,
-      });
+      const r = await axios.get(url, { timeout: API_TIMEOUT_MS, headers: { 'User-Agent': 'Mozilla/5.0 (KairoTool)' }, validateStatus: s => s >= 200 && s < 500 });
       if (r.status >= 400) throw new Error(`API HTTP ${r.status}`);
       return r.data;
     } catch (e) {
       lastErr = e;
-      if (attempt < API_RETRY) {
-        await new Promise(rs => setTimeout(rs, 500 * (attempt + 1)));
-      }
+      if (attempt < API_RETRY) await new Promise(rs => setTimeout(rs, 500 * (attempt + 1)));
     }
   }
   throw lastErr;
 }
 
-// Cache 3s để giảm tải upstream
 const PREDICT_CACHE = new Map();
-function getCached(gameId) {
-  const c = PREDICT_CACHE.get(gameId);
-  if (c && Date.now() < c.exp) return c.data;
-  return null;
-}
-function setCache(gameId, data, ttl = 3000) {
-  PREDICT_CACHE.set(gameId, { data, exp: Date.now() + ttl });
-}
+function getCached(gameId) { const c = PREDICT_CACHE.get(gameId); if (c && Date.now() < c.exp) return c.data; return null; }
+function setCache(gameId, data, ttl = 3000) { PREDICT_CACHE.set(gameId, { data, exp: Date.now() + ttl }); }
 
 app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) => {
   rebuildTokenMap();
-
   const gameId = tokenToGame(req.params.token);
-  if (!gameId) {
-    return res.status(403).json({ error: 'Token không hợp lệ hoặc đã hết hạn' });
-  }
+  if (!gameId) return res.status(403).json({ error: 'Token không hợp lệ hoặc đã hết hạn' });
 
-  // Cache hit
   const cached = getCached(gameId);
   if (cached) return res.json(cached);
-
-  if (circuitOpen(gameId)) {
-    return res.status(503).json({
-      error: 'Hệ thống tạm bảo trì, thử lại sau 30s',
-      status: 'BẢO TRÌ',
-      game: gameId,
-    });
-  }
+  if (circuitOpen(gameId)) return res.status(503).json({ error: 'Hệ thống tạm bảo trì', status: 'BẢO TRÌ', game: gameId });
 
   try {
     const raw = (await fetchGameApi(gameId)) || {};
     circuitSuccess(gameId);
-
     const type = GAME_TYPE[gameId] || 'sicbo';
     let data = {};
 
     if (type === 'md5hu') {
-      const phien   = String(raw.phien_hien_tai || '');
+      const phien = String(raw.phien_hien_tai || '');
       const du_doan = String(raw.du_doan || '').toUpperCase();
       const tin_cay = parseInt(raw.do_tin_cay, 10) || 50;
-
       const historyArr = [];
-      if (Array.isArray(raw.lossHistory)) {
-        for (const h of raw.lossHistory) {
-          historyArr.push({ phien: h.phien, du_doan: h.predicted, ket_qua: h.actual, danh_gia: 'LOSE' });
-        }
-      }
-      if (Array.isArray(raw.winHistory)) {
-        for (const h of raw.winHistory) {
-          historyArr.push({ phien: h.phien, du_doan: h.predicted, ket_qua: h.actual, danh_gia: 'WIN' });
-        }
-      }
+      if (Array.isArray(raw.lossHistory)) for (const h of raw.lossHistory) historyArr.push({ phien: h.phien, du_doan: h.predicted, ket_qua: h.actual, danh_gia: 'LOSE' });
+      if (Array.isArray(raw.winHistory)) for (const h of raw.winHistory) historyArr.push({ phien: h.phien, du_doan: h.predicted, ket_qua: h.actual, danh_gia: 'WIN' });
       historyArr.sort((a, b) => parseInt(b.phien, 10) - parseInt(a.phien, 10));
       historyArr.unshift({ phien, du_doan, ket_qua: null, danh_gia: null });
-
       data = { phien, du_doan, tin_cay, status: 'LIVE', history: historyArr.slice(0, 20) };
     } else {
-      // sicbo
       const history = Array.isArray(raw) ? raw : (raw.data || []);
-      if (!Array.isArray(history) || history.length === 0) {
-        throw new Error('API trả dữ liệu rỗng');
-      }
+      if (!Array.isArray(history) || history.length === 0) throw new Error('API trả dữ liệu rỗng');
       const phien = String(history[0].gameNum ?? '');
-      const pred  = predictSicbo(history);
-
+      const pred = predictSicbo(history);
       data = { phien, du_doan: pred.du_doan, tin_cay: pred.tin_cay, status: 'LIVE' };
-
       const historyArr = RUNTIME_HISTORY[gameId];
       const lastRecord = historyArr[0];
       if (lastRecord && lastRecord.phien !== phien && lastRecord.ket_qua === null) {
@@ -543,42 +371,29 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
       }
       data.history = historyArr;
     }
-
     setCache(gameId, data, 3000);
     return res.json(data);
   } catch (e) {
     circuitFail(gameId);
-    console.error(`[predict ${gameId}]`, e.message);
-
-    return res.json({
-      phien: '',
-      du_doan: '',
-      tin_cay: 0,
-      status: 'BẢO TRÌ',
-      message: 'Server game đang bảo trì hoặc kết nối chậm, vui lòng thử lại sau.',
-      history: RUNTIME_HISTORY[gameId] || [],
-    });
+    return res.json({ phien: '', du_doan: '', tin_cay: 0, status: 'BẢO TRÌ', message: 'Server game đang bảo trì.', history: RUNTIME_HISTORY[gameId] || [] });
   }
 });
 
 // ============================================================
-// API KÍCH HOẠT KEY (hỗ trợ device lock)
+// API KÍCH HOẠT KEY
 // ============================================================
 app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
   try {
     const key = String(req.body?.key || '').trim().toUpperCase();
     if (!key) return res.status(400).json({ ok: false, error: 'Thiếu key' });
 
-    // Device ID bắt buộc khi kích hoạt từ web
-    const deviceId = String(req.body?.device_id || req.headers['x-device-id'] || '').trim();
-    if (!deviceId) {
-      return res.status(400).json({ ok: false, error: 'Thiếu device id' });
+    // Lấy device_id từ body hoặc header, nếu không có thì fallback về IP
+    let deviceId = req.body?.device_id || req.headers['x-device-id'];
+    if (typeof deviceId !== 'string' || deviceId.trim().length < 5) {
+      deviceId = 'ip_' + clientIp(req).replace(/[^a-zA-Z0-9]/g, '_');
     }
 
-    const result = await pool.query(
-      'SELECT plan, duration_days, activated_at, expires_at, device_id FROM keys WHERE key = $1',
-      [key]
-    );
+    const result = await pool.query('SELECT plan, duration_days, activated_at, expires_at, device_id FROM keys WHERE key = $1', [key]);
     const row = result.rows[0];
     if (!row) return res.json({ ok: false, error: 'Key không tồn tại' });
 
@@ -587,28 +402,16 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
     if (row.activated_at == null) {
       const finalExp = row.duration_days == null ? null : nowSec + row.duration_days * 86400;
       const upd = await pool.query(
-        `UPDATE keys SET activated_at = $1, expires_at = $2, is_active = 1, device_id = $3
-         WHERE key = $4 AND activated_at IS NULL`,
+        `UPDATE keys SET activated_at = $1, expires_at = $2, is_active = 1, device_id = $3 WHERE key = $4 AND activated_at IS NULL`,
         [nowSec, finalExp, deviceId, key]
       );
-      if (upd.rowCount === 0) {
-        return res.json({ ok: false, error: 'Key vừa được kích hoạt bởi phiên khác' });
-      }
-      return res.json({
-        ok: true, first_time: true, plan: row.plan,
-        expires_at: finalExp,
-        expires_str: finalExp ? new Date(finalExp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn',
-      });
+      if (upd.rowCount === 0) return res.json({ ok: false, error: 'Key vừa được kích hoạt bởi phiên khác' });
+      return res.json({ ok: true, first_time: true, plan: row.plan, expires_at: finalExp, expires_str: finalExp ? new Date(finalExp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn' });
     }
 
-    // Key đã kích hoạt trước đó → kiểm tra device
     if (row.device_id && row.device_id !== deviceId) {
-      return res.status(403).json({
-        ok: false,
-        error: 'Key đã được sử dụng trên thiết bị khác. Mỗi key chỉ dùng được 1 thiết bị.',
-      });
+      return res.status(403).json({ ok: false, error: 'Key đã được sử dụng trên thiết bị khác. Mỗi key chỉ dùng được 1 thiết bị.' });
     }
-    // Nếu key cũ chưa có device_id (do migrate) → gán luôn
     if (!row.device_id) {
       await pool.query(`UPDATE keys SET device_id = $1 WHERE key = $2 AND device_id IS NULL`, [deviceId, key]);
     }
@@ -624,498 +427,152 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
 });
 
 // ============================================================
-// TELEGRAM BOT
+// TELEGRAM BOT (Giữ nguyên logic cơ bản)
 // ============================================================
 let bot = null;
-
-if (!BOT_TOKEN) {
-  console.warn('⚠️  TELEGRAM_TOKEN chưa cấu hình — Bot Telegram tắt.');
-} else {
+if (BOT_TOKEN) {
   try {
     const httpsAgent = new https.Agent({ rejectUnauthorized: false, family: 4 });
     bot = new TelegramBot(BOT_TOKEN, {
-      polling: { autoStart: false, interval: 1000, params: { timeout: 10 } },
+      polling: { autoStart: false, interval: 1000, params: { timeout: 10 }, conflictRetryDelayMs: 5000 },
       request: { agent: httpsAgent },
     });
-
-    bot.deleteWebHook()
-      .then(() => {
-        bot.startPolling();
-        console.log('🤖 Bot Telegram đã khởi động (đã xóa webhook cũ).');
-      })
-      .catch(err => console.error('Lỗi xóa webhook:', err.message));
-
+    bot.deleteWebHook().then(() => { bot.startPolling(); console.log('🤖 Bot Telegram OK.'); }).catch(e => console.error('Webhook err:', e.message));
     bot.on('polling_error', err => console.error('⚠️ Bot polling:', err.message));
-  } catch (err) {
-    console.error('❌ Lỗi khởi động Bot:', err.message);
-  }
+  } catch (err) { console.error('❌ Bot start error:', err.message); }
 }
 
 const userState = {};
-
-function genKey(plan) {
-  const pref = { '1d': 'HT1D', '4d': 'HT4D', '1w': 'HT1W', '1m': 'HT1M', '3m': 'HT3M', 'life': 'HTLIFE' }[plan] || 'HTX';
-  return `${pref}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-}
-
-function isAdmin(user) {
-  if (!user) return false;
-  if (ADMIN_ID !== null && user.id === ADMIN_ID) return true;
-  if (ADMIN_USER && user.username && user.username.toLowerCase() === ADMIN_USER) return true;
-  return false;
-}
-
-function safeSend(chatId, text, opts) {
-  return bot.sendMessage(chatId, text, opts).catch(e => console.error('sendMessage:', e.message));
-}
-function safeEdit(chatId, msgId, text, opts) {
-  return bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opts })
-    .catch(e => { if (!/message is not modified/i.test(e.message)) console.error('editMessage:', e.message); });
-}
-function safeEditCaption(chatId, msgId, caption, opts) {
-  return bot.editMessageCaption(caption, { chat_id: chatId, message_id: msgId, ...opts })
-    .catch(e => { if (!/message is not modified/i.test(e.message)) console.error('editCaption:', e.message); });
-}
-function safeDelete(chatId, msgId) {
-  return bot.deleteMessage(chatId, msgId).catch(() => {});
-}
+function genKey(plan) { const pref = { '1d': 'HT1D', '4d': 'HT4D', '1w': 'HT1W', '1m': 'HT1M', '3m': 'HT3M', 'life': 'HTLIFE' }[plan] || 'HTX'; return `${pref}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`; }
+function isAdmin(user) { return user && (user.id === ADMIN_ID || (user.username && user.username.toLowerCase() === ADMIN_USER)); }
+function safeSend(chatId, text, opts) { return bot.sendMessage(chatId, text, opts).catch(e => console.error('sendMessage:', e.message)); }
+function safeEdit(chatId, msgId, text, opts) { return bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opts }).catch(e => { }); }
+function safeEditCaption(chatId, msgId, caption, opts) { return bot.editMessageCaption(caption, { chat_id: chatId, message_id: msgId, ...opts }).catch(e => { }); }
+function safeDelete(chatId, msgId) { return bot.deleteMessage(chatId, msgId).catch(() => {}); }
 
 function mainMenuKeyboard(user) {
-  const rows = [
-    [{ text: '🛒 Mua Key', callback_data: 'buy_menu' }],
-    [{ text: '🔑 Nhập Key', callback_data: 'enter_key' }],
-  ];
+  const rows = [[{ text: '🛒 Mua Key', callback_data: 'buy_menu' }], [{ text: '🔑 Nhập Key', callback_data: 'enter_key' }]];
   if (isAdmin(user)) rows.push([{ text: '👑 Admin Panel', callback_data: 'admin_panel' }]);
   return { inline_keyboard: rows };
 }
-
 async function showStart(chatId, user) {
   if (!bot) return;
-  const text =
-    `🦁 <b>KAIRO TOOL</b>\n` +
-    `Chào <b>${user.first_name || 'bạn'}</b>!\n\n` +
-    `💰 <b>BẢNG GIÁ KEY</b>\n` +
-    `• 20k → 1 ngày\n• 30k → 4 ngày\n• 60k → 1 tuần\n` +
-    `• 120k → 1 tháng\n• 150k → 3 tháng\n• 220k → Vĩnh viễn\n\n` +
-    `👇 Chọn thao tác`;
+  const text = `🦁 <b>KAIRO TOOL</b>\nChào <b>${user.first_name || 'bạn'}</b>!\n\n💰 <b>BẢNG GIÁ KEY</b>\n• 20k → 1 ngày\n• 30k → 4 ngày\n• 60k → 1 tuần\n• 120k → 1 tháng\n• 150k → 3 tháng\n• 220k → Vĩnh viễn\n\n👇 Chọn thao tác`;
   safeSend(chatId, text, { parse_mode: 'HTML', reply_markup: mainMenuKeyboard(user) });
-}
-
-async function showKeyList(chatId, msgId, page = 0) {
-  const PAGE_SIZE = 8;
-  const offset = page * PAGE_SIZE;
-
-  const [rowsRes, countRes] = await Promise.all([
-    pool.query(
-      `SELECT key, plan, is_active, expires_at FROM keys
-       ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
-      [PAGE_SIZE, offset]
-    ).catch(() => ({ rows: [] })),
-    pool.query('SELECT COUNT(*) FROM keys').catch(() => ({ rows: [{ count: 0 }] })),
-  ]);
-
-  const total = Number(countRes.rows[0].count) || 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const rows = rowsRes.rows;
-
-  if (rows.length === 0) {
-    return safeEdit(chatId, msgId, '📭 Không có key nào.', {
-      parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [[{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]] },
-    });
-  }
-
-  const buttons = [];
-  let listText = `📋 <b>DANH SÁCH KEY</b> (trang ${page + 1}/${totalPages})\n\n`;
-  for (const r of rows) {
-    const status = r.is_active === 1 ? '✅' : '⏳';
-    const exp = r.expires_at ? new Date(r.expires_at * 1000).toLocaleDateString('vi-VN') : '∞';
-    listText += `${status} <code>${r.key}</code> — ${r.plan} — hạn: ${exp}\n`;
-    buttons.push([{ text: `🗑 Xóa ${r.key}`, callback_data: `delkey_confirm_${r.key}` }]);
-  }
-
-  const nav = [];
-  if (page > 0) nav.push({ text: '⬅️', callback_data: `keylist_${page - 1}` });
-  nav.push({ text: '🔙 Menu', callback_data: 'admin_panel' });
-  if (page < totalPages - 1) nav.push({ text: '➡️', callback_data: `keylist_${page + 1}` });
-  buttons.push(nav);
-
-  safeEdit(chatId, msgId, listText, {
-    parse_mode: 'HTML',
-    reply_markup: { inline_keyboard: buttons },
-  });
-}
-
-async function confirmDeleteKey(chatId, msgId, key) {
-  safeEdit(chatId, msgId,
-    `⚠️ <b>XÓA KEY?</b>\n\nKey: <code>${key}</code>\n\nHành động này <b>không thể hoàn tác</b>.`,
-    {
-      parse_mode: 'HTML',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '✅ Xóa', callback_data: `delkey_do_${key}` }, { text: '❌ Hủy', callback_data: 'keylist_0' }],
-        ],
-      },
-    });
-}
-
-async function doDeleteKey(chatId, msgId, key) {
-  try {
-    const r = await pool.query('DELETE FROM keys WHERE key = $1', [key]);
-    if (r.rowCount === 0) {
-      return safeEdit(chatId, msgId, `ℹ️ Key <code>${key}</code> không tồn tại.`, {
-        parse_mode: 'HTML',
-        reply_markup: { inline_keyboard: [[{ text: '🔙 Quay lại', callback_data: 'keylist_0' }]] },
-      });
-    }
-    safeEdit(chatId, msgId, `✅ Đã xóa key <code>${key}</code>.`, {
-      parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [[{ text: '🔙 Danh sách', callback_data: 'keylist_0' }]] },
-    });
-  } catch (e) {
-    console.error('doDeleteKey:', e.message);
-    safeEdit(chatId, msgId, `❌ Lỗi khi xóa: ${e.message}`, {
-      parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [[{ text: '🔙 Quay lại', callback_data: 'keylist_0' }]] },
-    });
-  }
 }
 
 if (bot) {
   bot.onText(/\/start/, msg => showStart(msg.chat.id, msg.from));
-
   bot.on('callback_query', async query => {
     let answered = false;
-    const answer = (text, alert = false) => {
-      if (answered) return;
-      answered = true;
-      bot.answerCallbackQuery(query.id, { text, show_alert: alert }).catch(() => {});
-    };
-
+    const answer = (text, alert = false) => { if (!answered) { answered = true; bot.answerCallbackQuery(query.id, { text, show_alert: alert }).catch(() => {}); } };
     try {
-      const chatId = query.message.chat.id;
-      const msgId  = query.message.message_id;
-      const data   = query.data;
-      const user   = query.from;
+      const chatId = query.message.chat.id, msgId = query.message.message_id, data = query.data, user = query.from;
       const hasCaption = !!query.message.caption;
 
-      if (data === 'back_start') {
-        safeDelete(chatId, msgId);
-        await showStart(chatId, user);
-      }
+      if (data === 'back_start') { safeDelete(chatId, msgId); await showStart(chatId, user); }
       else if (data === 'buy_menu') {
-        const rows = Object.entries(PRICES).map(([pid, cfg]) => [
-          { text: `💎 ${cfg.label} — ${cfg.price.toLocaleString('vi-VN')}đ`, callback_data: `buy_${pid}` },
-        ]);
+        const rows = Object.entries(PRICES).map(([pid, cfg]) => [{ text: `💎 ${cfg.label} — ${cfg.price.toLocaleString('vi-VN')}đ`, callback_data: `buy_${pid}` }]);
         rows.push([{ text: '🔙 Quay lại', callback_data: 'back_start' }]);
-        safeEdit(chatId, msgId, '🛒 <b>Chọn gói key:</b>', {
-          parse_mode: 'HTML',
-          reply_markup: { inline_keyboard: rows },
-        });
+        safeEdit(chatId, msgId, '🛒 <b>Chọn gói key:</b>', { parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } });
       }
       else if (data.startsWith('buy_')) {
-        const plan = data.replace('buy_', '');
-        const cfg  = PRICES[plan];
+        const plan = data.replace('buy_', ''), cfg = PRICES[plan];
         if (!cfg) return answer('Gói không tồn tại', true);
-
-        const orderId = crypto.randomBytes(4).toString('hex').toUpperCase();
-        const content = `HT${orderId}`;
-
-        await pool.query(
-          `INSERT INTO orders (id, user_id, username, full_name, plan, amount, content, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [orderId, user.id, user.username || '', user.first_name || '', plan, cfg.price, content, Date.now() / 1000]
-        ).catch(() => {});
-
+        const orderId = crypto.randomBytes(4).toString('hex').toUpperCase(), content = `HT${orderId}`;
+        await pool.query(`INSERT INTO orders (id, user_id, username, full_name, plan, amount, content, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [orderId, user.id, user.username || '', user.first_name || '', plan, cfg.price, content, Date.now() / 1000]).catch(() => {});
         const qrUrl = `https://vietqr.app/img?bank=${BANK_CODE}&acc=${BANK_ACC}&amount=${cfg.price}&addInfo=${content}&template=compact&showinfo=true&holder=${encodeURIComponent(BANK_HOLDER)}`;
-        const text =
-          `🧾 <b>ĐƠN #${orderId}</b>\n\n` +
-          `📦 Gói: <b>${cfg.label}</b>\n` +
-          `💵 Số tiền: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>\n` +
-          `🏦 Ngân hàng: <b>${BANK_CODE}</b>\n` +
-          `👤 Chủ TK: <b>${BANK_HOLDER}</b>\n` +
-          `💳 Số TK: <code>${BANK_ACC}</code>\n\n` +
-          `📝 <b>NỘI DUNG CK (bắt buộc):</b>\n<code>${content}</code>\n\n` +
-          `⚠️ Chuyển <b>đúng nội dung & đúng số tiền</b>.\nSau khi CK, nhấn nút bên dưới.`;
-        const kb = {
-          inline_keyboard: [
-            [{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }],
-            [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }],
-          ],
-        };
-
-        try {
-          await bot.sendPhoto(chatId, qrUrl, { caption: text, parse_mode: 'HTML', reply_markup: kb });
-          safeDelete(chatId, msgId);
-        } catch {
-          safeEdit(chatId, msgId, text, { parse_mode: 'HTML', reply_markup: kb });
-        }
+        const text = `🧾 <b>ĐƠN #${orderId}</b>\n\n📦 Gói: <b>${cfg.label}</b>\n💵 Số tiền: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>\n🏦 Ngân hàng: <b>${BANK_CODE}</b>\n👤 Chủ TK: <b>${BANK_HOLDER}</b>\n💳 Số TK: <code>${BANK_ACC}</code>\n\n📝 <b>NỘI DUNG CK:</b>\n<code>${content}</code>\n\n⚠️ Chuyển <b>đúng nội dung & đúng số tiền</b>.`;
+        const kb = { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] };
+        try { await bot.sendPhoto(chatId, qrUrl, { caption: text, parse_mode: 'HTML', reply_markup: kb }); safeDelete(chatId, msgId); } catch { safeEdit(chatId, msgId, text, { parse_mode: 'HTML', reply_markup: kb }); }
       }
       else if (data.startsWith('paid_')) {
         const orderId = data.replace('paid_', '');
-
-        // 🔒 Atomic claim: chỉ 1 callback được xử lý
-        const claim = await pool.query(
-          `UPDATE orders SET status='processing'
-           WHERE id=$1 AND status='pending'
-           RETURNING plan, amount, content`,
-          [orderId]
-        ).catch(() => ({ rowCount: 0, rows: [] }));
-
-        if (claim.rowCount === 0) {
-          // Đã xử lý hoặc không tồn tại
-          const check = await pool.query('SELECT status, key_issued FROM orders WHERE id=$1', [orderId]).catch(() => ({ rows: [] }));
-          const o = check.rows[0];
-          if (o && o.status === 'paid' && o.key_issued) {
-            return answer(`Đơn đã xử lý. Key: ${o.key_issued}`, true);
-          }
-          return answer('Đơn không tồn tại hoặc đã xử lý', true);
-        }
-
+        const claim = await pool.query(`UPDATE orders SET status='processing' WHERE id=$1 AND status='pending' RETURNING plan, amount, content`, [orderId]).catch(() => ({ rowCount: 0, rows: [] }));
+        if (claim.rowCount === 0) return answer('Đơn không tồn tại hoặc đã xử lý', true);
         const order = claim.rows[0];
         const baseCaption = hasCaption ? (query.message.caption || '').split('⏳')[0].trim() : '';
-        if (hasCaption && baseCaption) {
-          safeEditCaption(chatId, msgId, baseCaption + '\n\n⏳ <b>Đang kiểm tra giao dịch...</b>', { parse_mode: 'HTML' });
-        }
-
+        if (hasCaption && baseCaption) safeEditCaption(chatId, msgId, baseCaption + '\n\n⏳ <b>Đang kiểm tra...</b>', { parse_mode: 'HTML' });
         let tx = null;
         for (let i = 0; i < 3; i++) {
           try {
             const r = await axios.get(API_BANK, { timeout: 6000 });
             const txs = Array.isArray(r.data) ? r.data : (r.data.data || r.data.transactions || []);
-            tx = txs.find(t =>
-              t.content && t.content.toUpperCase().includes(order.content.toUpperCase()) &&
-              (t.amount || 0) >= order.amount
-            );
+            tx = txs.find(t => t.content && t.content.toUpperCase().includes(order.content.toUpperCase()) && (t.amount || 0) >= order.amount);
             if (tx) break;
-          } catch { /* ignore */ }
+          } catch { }
           await new Promise(r => setTimeout(r, 1500));
         }
-
         if (!tx) {
-          // Rollback status
           await pool.query(`UPDATE orders SET status='pending' WHERE id=$1 AND status='processing'`, [orderId]).catch(() => {});
-          const msg = (baseCaption || '🧾 Đơn hàng') + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!</b>\nBot chưa thấy giao dịch khớp.';
-          const kb = {
-            inline_keyboard: [
-              [{ text: '🔄 Kiểm tra lại', callback_data: `paid_${orderId}` }],
-              [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }],
-            ],
-          };
-          if (hasCaption) safeEditCaption(chatId, msgId, msg, { parse_mode: 'HTML', reply_markup: kb });
-          else safeEdit(chatId, msgId, msg, { parse_mode: 'HTML', reply_markup: kb });
+          const msg = (baseCaption || '🧾 Đơn hàng') + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!</b>';
+          const kb = { inline_keyboard: [[{ text: '🔄 Kiểm tra lại', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] };
+          if (hasCaption) safeEditCaption(chatId, msgId, msg, { parse_mode: 'HTML', reply_markup: kb }); else safeEdit(chatId, msgId, msg, { parse_mode: 'HTML', reply_markup: kb });
           return answer('Chưa thấy giao dịch');
         }
-
-        // --- THANH TOÁN THÀNH CÔNG ---
-        const key = genKey(order.plan);
-        const cfg = PRICES[order.plan];
-
-        await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4',
-          ['paid', Date.now() / 1000, key, orderId]).catch(() => {});
-        await pool.query(
-          'INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)',
-          [key, order.plan, cfg.days, Date.now() / 1000]
-        ).catch(() => {});
-
-        const successText =
-          `✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n` +
-          `🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n` +
-          `📦 Gói: <b>${cfg.label}</b>\n\n` +
-          `⚠️ Key chỉ kích hoạt được 1 lần.\nNhập lại <b>KHÔNG cộng thêm</b> thời gian.\n` +
-          `📱 Mỗi key chỉ dùng được trên <b>1 thiết bị duy nhất</b>.`;
-
-        if (hasCaption) safeEditCaption(chatId, msgId, successText, { parse_mode: 'HTML' });
-        else safeEdit(chatId, msgId, successText, { parse_mode: 'HTML' });
-
-        safeSend(chatId, `🔑 <b>KEY CỦA BẠN ĐÂY:</b>\n<code>${key}</code>\n\nHãy copy và nhấn "Nhập Key" để kích hoạt!`, { parse_mode: 'HTML' });
-
-        if (NOTIFY_CHANNEL_ID) {
-          const channelMsg =
-            `🎉 <b>CÓ NGƯỜI VỪA MUA KEY!</b>\n\n` +
-            `👤 Khách hàng: <b>${user.first_name || 'Ẩn danh'}</b>\n` +
-            `📦 Gói: <b>${cfg.label}</b>\n` +
-            `💵 Giá trị: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>\n\n` +
-            `🚀 Cảm ơn bạn đã ủng hộ KAIRO TOOL!`;
-          safeSend(NOTIFY_CHANNEL_ID, channelMsg, { parse_mode: 'HTML' });
-        }
-
-        if (ADMIN_ID) {
-          safeSend(ADMIN_ID,
-            `💰 <b>ĐƠN MỚI</b>\nUser: ${user.first_name} (@${user.username || 'no_username'})\n` +
-            `Gói: ${cfg.label}\nKey: <code>${key}</code>`,
-            { parse_mode: 'HTML' });
-        }
-
+        const key = genKey(order.plan), cfg = PRICES[order.plan];
+        await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4', ['paid', Date.now() / 1000, key, orderId]).catch(() => {});
+        await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, order.plan, cfg.days, Date.now() / 1000]).catch(() => {});
+        const successText = `✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n📦 Gói: <b>${cfg.label}</b>\n\n⚠️ Key chỉ kích hoạt được 1 lần.\n📱 Mỗi key chỉ dùng được trên <b>1 thiết bị duy nhất</b>.`;
+        if (hasCaption) safeEditCaption(chatId, msgId, successText, { parse_mode: 'HTML' }); else safeEdit(chatId, msgId, successText, { parse_mode: 'HTML' });
+        safeSend(chatId, `🔑 <b>KEY CỦA BẠN ĐÂY:</b>\n<code>${key}</code>`, { parse_mode: 'HTML' });
+        if (NOTIFY_CHANNEL_ID) safeSend(NOTIFY_CHANNEL_ID, `🎉 <b>CÓ NGƯỜI VỪA MUA KEY!</b>\n\n👤 Khách: <b>${user.first_name || 'Ẩn danh'}</b>\n📦 Gói: <b>${cfg.label}</b>\n💵 Giá trị: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>`, { parse_mode: 'HTML' });
         return answer('Thanh toán thành công!');
       }
-      else if (data === 'enter_key') {
-        userState[user.id] = 'WAITING_KEY';
-        safeSend(chatId, '🔑 <b>Nhập key của bạn</b>\n\nGửi key vào chat để kích hoạt.', { parse_mode: 'HTML' });
-      }
+      else if (data === 'enter_key') { userState[user.id] = 'WAITING_KEY'; safeSend(chatId, '🔑 <b>Nhập key của bạn</b>\n\nGửi key vào chat để kích hoạt.', { parse_mode: 'HTML' }); }
       else if (data === 'admin_panel' && isAdmin(user)) {
-        const [totalRes, activeRes, revRes] = await Promise.all([
-          pool.query('SELECT COUNT(*) FROM keys').catch(() => ({ rows: [{ count: 0 }] })),
-          pool.query('SELECT COUNT(*) FROM keys WHERE is_active=1').catch(() => ({ rows: [{ count: 0 }] })),
-          pool.query("SELECT SUM(amount) FROM orders WHERE status='paid'").catch(() => ({ rows: [{ sum: 0 }] })),
-        ]);
+        const [totalRes, activeRes, revRes] = await Promise.all([pool.query('SELECT COUNT(*) FROM keys').catch(() => ({ rows: [{ count: 0 }] })), pool.query('SELECT COUNT(*) FROM keys WHERE is_active=1').catch(() => ({ rows: [{ count: 0 }] })), pool.query("SELECT SUM(amount) FROM orders WHERE status='paid'").catch(() => ({ rows: [{ sum: 0 }] }))]);
         const rev = Number(revRes.rows[0].sum) || 0;
-        safeEdit(chatId, msgId,
-          `👑 <b>ADMIN PANEL</b>\n\n` +
-          `🔑 Tổng key: <b>${totalRes.rows[0].count}</b>\n` +
-          `✅ Active: <b>${activeRes.rows[0].count}</b>\n` +
-          `💰 Doanh thu: <b>${rev.toLocaleString('vi-VN')}đ</b>`,
-          {
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🎁 Tạo key tay', callback_data: 'admin_genkey' }],
-                [{ text: '📋 Quản lý / Xóa Key', callback_data: 'keylist_0' }],
-                [{ text: '🔙 Quay lại', callback_data: 'back_start' }],
-              ],
-            },
-          });
-      }
-      else if (data.startsWith('keylist_') && isAdmin(user)) {
-        const page = parseInt(data.replace('keylist_', ''), 10) || 0;
-        await showKeyList(chatId, msgId, page);
-      }
-      else if (data.startsWith('delkey_confirm_') && isAdmin(user)) {
-        const key = data.replace('delkey_confirm_', '');
-        await confirmDeleteKey(chatId, msgId, key);
-      }
-      else if (data.startsWith('delkey_do_') && isAdmin(user)) {
-        const key = data.replace('delkey_do_', '');
-        await doDeleteKey(chatId, msgId, key);
+        safeEdit(chatId, msgId, `👑 <b>ADMIN PANEL</b>\n\n🔑 Tổng key: <b>${totalRes.rows[0].count}</b>\n✅ Active: <b>${activeRes.rows[0].count}</b>\n💰 Doanh thu: <b>${rev.toLocaleString('vi-VN')}đ</b>`, { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🎁 Tạo key tay', callback_data: 'admin_genkey' }], [{ text: '🔙 Quay lại', callback_data: 'back_start' }]] } });
       }
       else if (data === 'admin_genkey' && isAdmin(user)) {
-        const rows = Object.entries(PRICES).map(([pid, cfg]) => [
-          { text: cfg.label, callback_data: `genkey_${pid}` },
-        ]);
+        const rows = Object.entries(PRICES).map(([pid, cfg]) => [{ text: cfg.label, callback_data: `genkey_${pid}` }]);
         rows.push([{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]);
-        safeEdit(chatId, msgId, '🎁 <b>Chọn gói để tạo key:</b>', {
-          parse_mode: 'HTML',
-          reply_markup: { inline_keyboard: rows },
-        });
+        safeEdit(chatId, msgId, '🎁 <b>Chọn gói để tạo key:</b>', { parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } });
       }
       else if (data.startsWith('genkey_') && isAdmin(user)) {
-        const plan = data.replace('genkey_', '');
-        const cfg = PRICES[plan];
+        const plan = data.replace('genkey_', ''), cfg = PRICES[plan];
         if (!cfg) return answer('Gói không tồn tại', true);
         const key = genKey(plan);
-        await pool.query(
-          'INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)',
-          [key, plan, cfg.days, Date.now() / 1000]
-        ).catch(() => {});
-        safeEdit(chatId, msgId,
-          `✅ <b>ĐÃ TẠO KEY</b>\n\nGói: ${cfg.label}\n🔑 <code>${key}</code>`,
-          {
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🎁 Tạo thêm', callback_data: 'admin_genkey' }],
-                [{ text: '🔙 Quay lại', callback_data: 'admin_panel' }],
-              ],
-            },
-          });
+        await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, plan, cfg.days, Date.now() / 1000]).catch(() => {});
+        safeEdit(chatId, msgId, `✅ <b>ĐÃ TẠO KEY</b>\n\nGói: ${cfg.label}\n🔑 <code>${key}</code>`, { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🎁 Tạo thêm', callback_data: 'admin_genkey' }], [{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]] } });
       }
-
       answer();
-    } catch (e) {
-      console.error('callback_query:', e.message);
-      answer('Có lỗi xảy ra', true);
-    }
+    } catch (e) { answer('Có lỗi xảy ra', true); }
   });
 
   bot.on('message', async msg => {
     try {
       if (!msg.text || msg.text.startsWith('/')) return;
-      const userId = msg.from?.id;
-      const chatId = msg.chat.id;
-
+      const userId = msg.from?.id, chatId = msg.chat.id;
       if (userState[userId] === 'WAITING_KEY') {
         delete userState[userId];
         const key = msg.text.trim().toUpperCase();
-        const res = await pool.query(
-          'SELECT plan, duration_days, activated_at, expires_at, device_id FROM keys WHERE key=$1',
-          [key]
-        );
+        const res = await pool.query('SELECT plan, duration_days, activated_at, expires_at, device_id FROM keys WHERE key=$1', [key]);
         const row = res.rows[0];
         if (!row) return safeSend(chatId, '❌ Key không tồn tại.');
-
         const cfg = PRICES[row.plan] || { label: row.plan };
         const nowSec = Date.now() / 1000;
-
-        // Với bot, dùng telegram user ID làm device ID (không thay đổi luồng cũ)
         const tgDeviceId = `tg:${userId}`;
 
         if (row.activated_at == null) {
           const exp = row.duration_days == null ? null : nowSec + row.duration_days * 86400;
-          const upd = await pool.query(
-            `UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1, device_id=$3
-             WHERE key=$4 AND activated_at IS NULL`,
-            [nowSec, exp, tgDeviceId, key]
-          );
-          if (upd.rowCount === 0) {
-            return safeSend(chatId, '⚠️ Key vừa được kích hoạt bởi phiên khác, thử lại.');
-          }
+          const upd = await pool.query(`UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1, device_id=$3 WHERE key=$4 AND activated_at IS NULL`, [nowSec, exp, tgDeviceId, key]);
+          if (upd.rowCount === 0) return safeSend(chatId, '⚠️ Key vừa được kích hoạt bởi phiên khác.');
           const expStr = exp ? new Date(exp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn';
-          return safeSend(chatId,
-            `✅ <b>KÍCH HOẠT THÀNH CÔNG!</b>\n\n` +
-            `🔑 Key: <code>${key}</code>\n` +
-            `📦 Gói: <b>${cfg.label}</b>\n` +
-            `⏰ Hạn dùng: <b>${expStr}</b>`,
-            { parse_mode: 'HTML' });
+          return safeSend(chatId, `✅ <b>KÍCH HOẠT THÀNH CÔNG!</b>\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn dùng: <b>${expStr}</b>`, { parse_mode: 'HTML' });
         }
-
-        // Key đã kích hoạt trước đó — kiểm tra device
-        if (row.device_id && row.device_id !== tgDeviceId) {
-          return safeSend(chatId,
-            `❌ Key đã được kích hoạt trên thiết bị khác.\nMỗi key chỉ dùng được trên 1 thiết bị duy nhất.`,
-            { parse_mode: 'HTML' });
-        }
-        if (!row.device_id) {
-          await pool.query(
-            `UPDATE keys SET device_id=$1 WHERE key=$2 AND device_id IS NULL`,
-            [tgDeviceId, key]
-          );
-        }
-
-        if (row.duration_days != null && row.expires_at && nowSec > row.expires_at) {
-          return safeSend(chatId,
-            `❌ Key đã <b>hết hạn</b> từ ${new Date(row.expires_at * 1000).toLocaleString('vi-VN')}.`,
-            { parse_mode: 'HTML' });
-        }
-
-        const expStr = row.expires_at
-          ? new Date(row.expires_at * 1000).toLocaleString('vi-VN')
-          : 'Vĩnh viễn';
-        return safeSend(chatId,
-          `ℹ️ Key này <b>đã được kích hoạt trước đó</b>.\n\n` +
-          `🔑 Key: <code>${key}</code>\n` +
-          `📦 Gói: <b>${cfg.label}</b>\n` +
-          `⏰ Hạn: <b>${expStr}</b>`,
-          { parse_mode: 'HTML' });
+        if (row.device_id && row.device_id !== tgDeviceId) return safeSend(chatId, `❌ Key đã được kích hoạt trên thiết bị khác.`);
+        if (!row.device_id) await pool.query(`UPDATE keys SET device_id=$1 WHERE key=$2 AND device_id IS NULL`, [tgDeviceId, key]);
+        if (row.duration_days != null && row.expires_at && nowSec > row.expires_at) return safeSend(chatId, `❌ Key đã <b>hết hạn</b>.`, { parse_mode: 'HTML' });
+        const expStr = row.expires_at ? new Date(row.expires_at * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn';
+        return safeSend(chatId, `ℹ️ Key này <b>đã được kích hoạt trước đó</b>.\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn: <b>${expStr}</b>`, { parse_mode: 'HTML' });
       }
-    } catch (e) {
-      console.error('message handler:', e.message);
-      safeSend(msg.chat.id, 'Lỗi Server!');
-    }
+    } catch (e) { safeSend(msg.chat.id, 'Lỗi Server!'); }
   });
 }
 
-// ============================================================
-// START SERVER
-// ============================================================
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🌐 Web Server running on port ${PORT}`);
-});
-
+app.listen(PORT, '0.0.0.0', () => { console.log(`🌐 Web Server running on port ${PORT}`); });
 process.on('unhandledRejection', err => console.error('UnhandledRejection:', err));
 process.on('uncaughtException', err => console.error('UncaughtException:', err));
-
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down...');
-  try { bot?.stopPolling(); } catch {}
-  pool.end().finally(() => process.exit(0));
-});
+process.on('SIGTERM', () => { try { bot?.stopPolling(); } catch {} pool.end().finally(() => process.exit(0)); });
