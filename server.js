@@ -102,8 +102,6 @@ async function initDB() {
         created_at DOUBLE PRECISION, paid_at DOUBLE PRECISION, key_issued TEXT
       );
     `);
-    
-    // Nếu bảng cũ chưa có cột device_id thì thêm vào
     await pool.query(`ALTER TABLE keys ADD COLUMN IF NOT EXISTS device_id TEXT`).catch(() => {});
     console.log('✅ Database Ready!');
   } catch (err) {
@@ -192,7 +190,7 @@ app.get('/index.html', (req, res) => res.sendFile(path.join(__dirname, 'index.ht
 app.get('/kho.html', (req, res) => res.sendFile(path.join(__dirname, 'kho.html')));
 
 // ============================================================
-// DEVICE LOCK MIDDLEWARE (CHẶN NẾU KHÔNG CÓ DEVICE_ID)
+// DEVICE LOCK MIDDLEWARE
 // ============================================================
 async function requireValidKey(req, res, next) {
   try {
@@ -202,14 +200,13 @@ async function requireValidKey(req, res, next) {
     if (!key) return res.status(401).json({ ok: false, error: 'Thiếu key xác thực' });
 
     const deviceId = String(req.headers['x-device-id'] || '').trim();
-    if (!deviceId) return res.status(400).json({ ok: false, error: 'Lỗi: Không tìm thấy Device ID từ trình duyệt' });
+    if (!deviceId) return res.status(400).json({ ok: false, error: 'Lỗi: Không tìm thấy Device ID' });
 
     const result = await pool.query('SELECT * FROM keys WHERE key = $1', [key]);
     const row = result.rows[0];
     if (!row || row.is_active !== 1) return res.status(401).json({ ok: false, error: 'Key không hợp lệ hoặc chưa kích hoạt' });
     if (row.expires_at != null && (Date.now() / 1000) > row.expires_at) return res.status(401).json({ ok: false, error: 'Key đã hết hạn' });
 
-    // KIỂM TRA THIẾT BỊ
     if (row.device_id == null) {
       await pool.query(`UPDATE keys SET device_id = $1 WHERE key = $2 AND device_id IS NULL`, [deviceId, key]);
       row.device_id = deviceId;
@@ -277,13 +274,9 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
   }
 });
 
-// ============================================================
-// API KÍCH HOẠT KEY
-// ============================================================
 app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
   try {
     const key = String(req.body?.key || '').trim().toUpperCase();
-    // Nhận device_id: Frontend gửi lên qua Body hoặc Header
     const deviceId = String(req.body?.device_id || req.headers['x-device-id'] || '').trim();
     
     if (!key) return res.status(400).json({ ok: false, error: 'Thiếu key' });
@@ -319,18 +312,13 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
 });
 
 // ============================================================
-// TELEGRAM BOT (Chống delay / 409)
+// TELEGRAM BOT FULL ADMIN PANEL
 // ============================================================
 let bot = null;
 if (BOT_TOKEN) {
   const httpsAgent = new https.Agent({ rejectUnauthorized: false, family: 4 });
   bot = new TelegramBot(BOT_TOKEN, {
-    polling: { 
-      autoStart: false, 
-      interval: 1000, 
-      params: { timeout: 10 },
-      conflictRetryDelayMs: 3000 // Tự động thử lại sau 3s nếu mạng lag
-    },
+    polling: { autoStart: false, interval: 1000, params: { timeout: 10 }, conflictRetryDelayMs: 3000 },
     request: { agent: httpsAgent },
   });
 
@@ -346,89 +334,273 @@ if (BOT_TOKEN) {
   });
 }
 
-// CÁC HÀM XỬ LÝ BOT CƠ BẢN
 const userState = {};
-function genKey(plan) { return `HT${plan.toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`; }
+function genKey(plan) {
+  const pref = { '1d': 'HT1D', '4d': 'HT4D', '1w': 'HT1W', '1m': 'HT1M', '3m': 'HT3M', 'life': 'HTLIFE' }[plan] || 'HTX';
+  return `${pref}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+}
+function isAdmin(user) {
+  if (!user) return false;
+  if (ADMIN_ID !== null && user.id === ADMIN_ID) return true;
+  if (ADMIN_USER && user.username && user.username.toLowerCase() === ADMIN_USER) return true;
+  return false;
+}
+
 function safeSend(chatId, text, opts) { return bot.sendMessage(chatId, text, opts).catch(() => {}); }
+function safeEdit(chatId, msgId, text, opts) { return bot.editMessageText(text, { chat_id: chatId, message_id: msgId, ...opts }).catch(() => {}); }
+function safeEditCaption(chatId, msgId, caption, opts) { return bot.editMessageCaption(caption, { chat_id: chatId, message_id: msgId, ...opts }).catch(() => {}); }
+function safeDelete(chatId, msgId) { return bot.deleteMessage(chatId, msgId).catch(() => {}); }
+
+function mainMenuKeyboard(user) {
+  const rows = [
+    [{ text: '🛒 Mua Key', callback_data: 'buy_menu' }],
+    [{ text: '🔑 Nhập Key', callback_data: 'enter_key' }],
+  ];
+  if (isAdmin(user)) rows.push([{ text: '👑 Admin Panel', callback_data: 'admin_panel' }]);
+  return { inline_keyboard: rows };
+}
+
+async function showStart(chatId, user) {
+  if (!bot) return;
+  const text = `🦁 <b>KAIRO TOOL</b>\nChào <b>${user.first_name || 'bạn'}</b>!\n\n👇 Chọn thao tác`;
+  safeSend(chatId, text, { parse_mode: 'HTML', reply_markup: mainMenuKeyboard(user) });
+}
+
+async function showKeyList(chatId, msgId, page = 0) {
+  const PAGE_SIZE = 8;
+  const offset = page * PAGE_SIZE;
+
+  const [rowsRes, countRes] = await Promise.all([
+    pool.query(`SELECT key, plan, is_active, expires_at FROM keys ORDER BY created_at DESC LIMIT $1 OFFSET $2`, [PAGE_SIZE, offset]).catch(() => ({ rows: [] })),
+    pool.query('SELECT COUNT(*) FROM keys').catch(() => ({ rows: [{ count: 0 }] })),
+  ]);
+
+  const total = Number(countRes.rows[0].count) || 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const rows = rowsRes.rows;
+
+  if (rows.length === 0) {
+    return safeEdit(chatId, msgId, '📭 Không có key nào.', {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [[{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]] },
+    });
+  }
+
+  const buttons = [];
+  let listText = `📋 <b>DANH SÁCH KEY</b> (trang ${page + 1}/${totalPages})\n\n`;
+  for (const r of rows) {
+    const status = r.is_active === 1 ? '✅' : '⏳';
+    const exp = r.expires_at ? new Date(r.expires_at * 1000).toLocaleDateString('vi-VN') : '∞';
+    listText += `${status} <code>${r.key}</code> — ${r.plan} — hạn: ${exp}\n`;
+    buttons.push([
+      { text: `♻️ Reset Máy`, callback_data: `resetkey_${r.key}` },
+      { text: `🗑 Xóa`, callback_data: `delkey_confirm_${r.key}` }
+    ]);
+  }
+
+  const nav = [];
+  if (page > 0) nav.push({ text: '⬅️', callback_data: `keylist_${page - 1}` });
+  nav.push({ text: '🔙 Menu', callback_data: 'admin_panel' });
+  if (page < totalPages - 1) nav.push({ text: '➡️', callback_data: `keylist_${page + 1}` });
+  buttons.push(nav);
+
+  safeEdit(chatId, msgId, listText, { parse_mode: 'HTML', reply_markup: { inline_keyboard: buttons } });
+}
 
 if (bot) {
-  bot.onText(/\/start/, msg => {
-    const text = `🦁 <b>KAIRO TOOL</b>\nChào <b>${msg.from.first_name}</b>!\n\n👇 Chọn thao tác:`;
-    const kb = { inline_keyboard: [[{ text: '🛒 Mua Key', callback_data: 'buy_menu' }], [{ text: '🔑 Nhập Key', callback_data: 'enter_key' }]] };
-    safeSend(msg.chat.id, text, { parse_mode: 'HTML', reply_markup: kb });
-  });
+  bot.onText(/\/start/, msg => showStart(msg.chat.id, msg.from));
 
   bot.on('callback_query', async query => {
-    const chatId = query.message.chat.id;
-    const msgId = query.message.message_id;
-    const data = query.data;
-    bot.answerCallbackQuery(query.id).catch(()=>{});
+    let answered = false;
+    const answer = (text, alert = false) => { if (!answered) { answered = true; bot.answerCallbackQuery(query.id, { text, show_alert: alert }).catch(() => {}); } };
 
-    if (data === 'buy_menu') {
-      const rows = Object.entries(PRICES).map(([pid, cfg]) => [{ text: `${cfg.label} - ${cfg.price.toLocaleString('vi-VN')}đ`, callback_data: `buy_${pid}` }]);
-      bot.editMessageText('🛒 <b>Chọn gói key:</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } }).catch(()=>{});
-    } else if (data.startsWith('buy_')) {
-      const plan = data.replace('buy_', '');
-      const cfg = PRICES[plan];
-      const orderId = crypto.randomBytes(4).toString('hex').toUpperCase();
-      const content = `HT${orderId}`;
-      
-      await pool.query(`INSERT INTO orders (id, user_id, username, full_name, plan, amount, content, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [orderId, query.from.id, query.from.username || '', query.from.first_name || '', plan, cfg.price, content, Date.now()/1000]).catch(()=>{});
-      
-      const text = `🧾 <b>ĐƠN #${orderId}</b>\n\n📦 Gói: <b>${cfg.label}</b>\n💵 Số tiền: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>\n🏦 Ngân hàng: <b>${BANK_CODE}</b>\n💳 Số TK: <code>${BANK_ACC}</code>\n\n📝 <b>NỘI DUNG CK:</b>\n<code>${content}</code>`;
-      const kb = { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }]] };
-      bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: kb }).catch(()=>{});
-    } else if (data.startsWith('paid_')) {
-      const orderId = data.replace('paid_', '');
-      bot.editMessageText('⏳ Đang kiểm tra giao dịch...', { chat_id: chatId, message_id: msgId }).catch(()=>{});
-      
-      try {
-        const r = await axios.get(API_BANK, { timeout: 6000 });
-        const txs = Array.isArray(r.data) ? r.data : (r.data.data || []);
-        const orderRes = await pool.query('SELECT * FROM orders WHERE id=$1', [orderId]);
-        const order = orderRes.rows[0];
-        
-        const tx = txs.find(t => t.content && t.content.toUpperCase().includes(order.content.toUpperCase()) && (t.amount || 0) >= order.amount);
+    try {
+      const chatId = query.message.chat.id;
+      const msgId = query.message.message_id;
+      const data = query.data;
+      const user = query.from;
+      const hasCaption = !!query.message.caption;
+
+      if (data === 'back_start') {
+        safeDelete(chatId, msgId);
+        await showStart(chatId, user);
+      }
+      else if (data === 'buy_menu') {
+        const rows = Object.entries(PRICES).map(([pid, cfg]) => [{ text: `💎 ${cfg.label} — ${cfg.price.toLocaleString('vi-VN')}đ`, callback_data: `buy_${pid}` }]);
+        rows.push([{ text: '🔙 Quay lại', callback_data: 'back_start' }]);
+        safeEdit(chatId, msgId, '🛒 <b>Chọn gói key:</b>', { parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } });
+      }
+      else if (data.startsWith('buy_')) {
+        const plan = data.replace('buy_', '');
+        const cfg = PRICES[plan];
+        if (!cfg) return answer('Gói không tồn tại', true);
+
+        const orderId = crypto.randomBytes(4).toString('hex').toUpperCase();
+        const content = `HT${orderId}`;
+
+        await pool.query(
+          `INSERT INTO orders (id, user_id, username, full_name, plan, amount, content, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [orderId, user.id, user.username || '', user.first_name || '', plan, cfg.price, content, Date.now() / 1000]
+        ).catch(() => {});
+
+        const qrUrl = `https://vietqr.app/img?bank=${BANK_CODE}&acc=${BANK_ACC}&amount=${cfg.price}&addInfo=${content}&template=compact&showinfo=true&holder=${encodeURIComponent(BANK_HOLDER)}`;
+        const text = `🧾 <b>ĐƠN #${orderId}</b>\n\n📦 Gói: <b>${cfg.label}</b>\n💵 Số tiền: <b>${cfg.price.toLocaleString('vi-VN')}đ</b>\n🏦 Ngân hàng: <b>${BANK_CODE}</b>\n👤 Chủ TK: <b>${BANK_HOLDER}</b>\n💳 Số TK: <code>${BANK_ACC}</code>\n\n📝 <b>NỘI DUNG CK (bắt buộc):</b>\n<code>${content}</code>\n\n⚠️ Chuyển <b>đúng nội dung & đúng số tiền</b>.`;
+        const kb = { inline_keyboard: [[{ text: '✅ Tôi đã chuyển khoản', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] };
+
+        try { await bot.sendPhoto(chatId, qrUrl, { caption: text, parse_mode: 'HTML', reply_markup: kb }); safeDelete(chatId, msgId); }
+        catch { safeEdit(chatId, msgId, text, { parse_mode: 'HTML', reply_markup: kb }); }
+      }
+      else if (data.startsWith('paid_')) {
+        const orderId = data.replace('paid_', '');
+        const claim = await pool.query(`UPDATE orders SET status='processing' WHERE id=$1 AND status='pending' RETURNING plan, amount, content`, [orderId]).catch(() => ({ rowCount: 0, rows: [] }));
+        if (claim.rowCount === 0) return answer('Đơn không tồn tại hoặc đã xử lý', true);
+
+        const order = claim.rows[0];
+        const baseCaption = hasCaption ? (query.message.caption || '').split('⏳')[0].trim() : '';
+        if (hasCaption && baseCaption) safeEditCaption(chatId, msgId, baseCaption + '\n\n⏳ <b>Đang kiểm tra...</b>', { parse_mode: 'HTML' });
+
+        let tx = null;
+        for (let i = 0; i < 3; i++) {
+          try {
+            const r = await axios.get(API_BANK, { timeout: 6000 });
+            const txs = Array.isArray(r.data) ? r.data : (r.data.data || r.data.transactions || []);
+            tx = txs.find(t => t.content && t.content.toUpperCase().includes(order.content.toUpperCase()) && (t.amount || 0) >= order.amount);
+            if (tx) break;
+          } catch { }
+          await new Promise(r => setTimeout(r, 1500));
+        }
+
         if (!tx) {
-          return bot.editMessageText('❌ <b>Chưa thấy giao dịch!</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML' }).catch(()=>{});
+          await pool.query(`UPDATE orders SET status='pending' WHERE id=$1 AND status='processing'`, [orderId]).catch(() => {});
+          const msg = (baseCaption || '🧾 Đơn hàng') + '\n\n❌ <b>CHƯA CHUYỂN KHOẢN!</b>';
+          const kb = { inline_keyboard: [[{ text: '🔄 Kiểm tra lại', callback_data: `paid_${orderId}` }], [{ text: '🔙 Quay lại', callback_data: 'buy_menu' }]] };
+          if (hasCaption) safeEditCaption(chatId, msgId, msg, { parse_mode: 'HTML', reply_markup: kb });
+          else safeEdit(chatId, msgId, msg, { parse_mode: 'HTML', reply_markup: kb });
+          return answer('Chưa thấy giao dịch');
         }
 
         const key = genKey(order.plan);
-        await pool.query('UPDATE orders SET status=$1, key_issued=$2 WHERE id=$3', ['paid', key, orderId]);
-        await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, order.plan, PRICES[order.plan].days, Date.now()/1000]);
-        
-        bot.editMessageText(`✅ <b>THÀNH CÔNG!</b>\n\n🔑 Key: <code>${key}</code>`, { chat_id: chatId, message_id: msgId, parse_mode: 'HTML' }).catch(()=>{});
-      } catch (e) {
-        bot.editMessageText('❌ Lỗi kiểm tra giao dịch!', { chat_id: chatId, message_id: msgId }).catch(()=>{});
+        const cfg = PRICES[order.plan];
+
+        await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4', ['paid', Date.now() / 1000, key, orderId]).catch(() => {});
+        await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, order.plan, cfg.days, Date.now() / 1000]).catch(() => {});
+
+        const successText = `✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n📦 Gói: <b>${cfg.label}</b>\n\n⚠️ Key chỉ kích hoạt được 1 lần.\n📱 Mỗi key chỉ dùng được trên <b>1 thiết bị duy nhất</b>.`;
+        if (hasCaption) safeEditCaption(chatId, msgId, successText, { parse_mode: 'HTML' });
+        else safeEdit(chatId, msgId, successText, { parse_mode: 'HTML' });
+
+        safeSend(chatId, `🔑 <b>KEY CỦA BẠN ĐÂY:</b>\n<code>${key}</code>`, { parse_mode: 'HTML' });
+        return answer('Thanh toán thành công!');
       }
-    } else if (data === 'enter_key') {
-      userState[query.from.id] = 'WAITING_KEY';
-      safeSend(chatId, '🔑 Vui lòng gửi Key của bạn vào chat:');
+      else if (data === 'enter_key') {
+        userState[user.id] = 'WAITING_KEY';
+        safeSend(chatId, '🔑 <b>Nhập key của bạn</b>\n\nGửi key vào chat để kích hoạt.', { parse_mode: 'HTML' });
+      }
+      else if (data === 'admin_panel' && isAdmin(user)) {
+        const [totalRes, activeRes, revRes] = await Promise.all([
+          pool.query('SELECT COUNT(*) FROM keys').catch(() => ({ rows: [{ count: 0 }] })),
+          pool.query('SELECT COUNT(*) FROM keys WHERE is_active=1').catch(() => ({ rows: [{ count: 0 }] })),
+          pool.query("SELECT SUM(amount) FROM orders WHERE status='paid'").catch(() => ({ rows: [{ sum: 0 }] })),
+        ]);
+        const rev = Number(revRes.rows[0].sum) || 0;
+        safeEdit(chatId, msgId,
+          `👑 <b>ADMIN PANEL</b>\n\n🔑 Tổng key: <b>${totalRes.rows[0].count}</b>\n✅ Active: <b>${activeRes.rows[0].count}</b>\n💰 Doanh thu: <b>${rev.toLocaleString('vi-VN')}đ</b>`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🎁 Tạo key tay', callback_data: 'admin_genkey' }],
+                [{ text: '📋 Quản lý / Xóa Key', callback_data: 'keylist_0' }],
+                [{ text: '🔙 Quay lại', callback_data: 'back_start' }],
+              ],
+            },
+          });
+      }
+      else if (data.startsWith('keylist_') && isAdmin(user)) {
+        const page = parseInt(data.replace('keylist_', ''), 10) || 0;
+        await showKeyList(chatId, msgId, page);
+      }
+      else if (data.startsWith('delkey_confirm_') && isAdmin(user)) {
+        const key = data.replace('delkey_confirm_', '');
+        safeEdit(chatId, msgId, `⚠️ <b>XÓA KEY?</b>\n\nKey: <code>${key}</code>\n\nHành động này <b>không thể hoàn tác</b>.`, {
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[{ text: '✅ Xóa', callback_data: `delkey_do_${key}` }, { text: '❌ Hủy', callback_data: 'keylist_0' }]] },
+        });
+      }
+      else if (data.startsWith('delkey_do_') && isAdmin(user)) {
+        const key = data.replace('delkey_do_', '');
+        await pool.query('DELETE FROM keys WHERE key = $1', [key]).catch(() => {});
+        safeEdit(chatId, msgId, `✅ Đã xóa key <code>${key}</code>.`, {
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Danh sách', callback_data: 'keylist_0' }]] },
+        });
+      }
+      else if (data.startsWith('resetkey_') && isAdmin(user)) {
+        const key = data.replace('resetkey_', '');
+        await pool.query('UPDATE keys SET device_id = NULL WHERE key = $1', [key]).catch(() => {});
+        safeEdit(chatId, msgId, `✅ Đã <b>Reset Thiết Bị</b> cho key <code>${key}</code>.\n\nKhách hàng có thể đăng nhập trên máy mới.`, {
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Danh sách', callback_data: 'keylist_0' }]] },
+        });
+      }
+      else if (data === 'admin_genkey' && isAdmin(user)) {
+        const rows = Object.entries(PRICES).map(([pid, cfg]) => [{ text: cfg.label, callback_data: `genkey_${pid}` }]);
+        rows.push([{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]);
+        safeEdit(chatId, msgId, '🎁 <b>Chọn gói để tạo key:</b>', { parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } });
+      }
+      else if (data.startsWith('genkey_') && isAdmin(user)) {
+        const plan = data.replace('genkey_', '');
+        const cfg = PRICES[plan];
+        if (!cfg) return answer('Gói không tồn tại', true);
+        const key = genKey(plan);
+        await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, plan, cfg.days, Date.now() / 1000]).catch(() => {});
+        safeEdit(chatId, msgId, `✅ <b>ĐÃ TẠO KEY</b>\n\nGói: ${cfg.label}\n🔑 <code>${key}</code>`, {
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[{ text: '🎁 Tạo thêm', callback_data: 'admin_genkey' }], [{ text: '🔙 Quay lại', callback_data: 'admin_panel' }]] },
+        });
+      }
+      answer();
+    } catch (e) {
+      answer('Có lỗi xảy ra', true);
     }
   });
 
   bot.on('message', async msg => {
-    if (!msg.text || msg.text.startsWith('/')) return;
-    if (userState[msg.from.id] === 'WAITING_KEY') {
-      delete userState[msg.from.id];
-      const key = msg.text.trim().toUpperCase();
-      const res = await pool.query('SELECT * FROM keys WHERE key=$1', [key]);
-      const row = res.rows[0];
-      if (!row) return safeSend(msg.chat.id, '❌ Key không tồn tại.');
+    try {
+      if (!msg.text || msg.text.startsWith('/')) return;
+      const userId = msg.from?.id;
+      const chatId = msg.chat.id;
 
-      const tgDeviceId = `tg:${msg.from.id}`;
-      const nowSec = Date.now() / 1000;
+      if (userState[userId] === 'WAITING_KEY') {
+        delete userState[userId];
+        const key = msg.text.trim().toUpperCase();
+        const res = await pool.query('SELECT * FROM keys WHERE key=$1', [key]);
+        const row = res.rows[0];
+        if (!row) return safeSend(chatId, '❌ Key không tồn tại.');
 
-      if (row.activated_at == null) {
-        const exp = row.duration_days == null ? null : nowSec + row.duration_days * 86400;
-        await pool.query(`UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1, device_id=$3 WHERE key=$4`, [nowSec, exp, tgDeviceId, key]);
-        safeSend(msg.chat.id, `✅ <b>KÍCH HOẠT THÀNH CÔNG!</b>\nHạn dùng: ${exp ? new Date(exp*1000).toLocaleString('vi-VN') : 'Vĩnh viễn'}`, { parse_mode: 'HTML' });
-      } else if (row.device_id && row.device_id !== tgDeviceId) {
-        safeSend(msg.chat.id, '❌ Key đã được sử dụng trên thiết bị khác!');
-      } else {
-        safeSend(msg.chat.id, 'ℹ️ Key đã được kích hoạt trước đó.');
+        const cfg = PRICES[row.plan] || { label: row.plan };
+        const nowSec = Date.now() / 1000;
+        const tgDeviceId = `tg:${userId}`;
+
+        if (row.activated_at == null) {
+          const exp = row.duration_days == null ? null : nowSec + row.duration_days * 86400;
+          const upd = await pool.query(`UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1, device_id=$3 WHERE key=$4 AND activated_at IS NULL`, [nowSec, exp, tgDeviceId, key]);
+          if (upd.rowCount === 0) return safeSend(chatId, '⚠️ Key vừa được kích hoạt bởi phiên khác.');
+          
+          const expStr = exp ? new Date(exp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn';
+          return safeSend(chatId, `✅ <b>KÍCH HOẠT THÀNH CÔNG!</b>\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn dùng: <b>${expStr}</b>`, { parse_mode: 'HTML' });
+        }
+        
+        if (row.device_id && row.device_id !== tgDeviceId) return safeSend(chatId, `❌ Key đã được kích hoạt trên thiết bị khác.`);
+        
+        if (row.duration_days != null && row.expires_at && nowSec > row.expires_at) {
+          return safeSend(chatId, `❌ Key đã <b>hết hạn</b>.`, { parse_mode: 'HTML' });
+        }
+        
+        const expStr = row.expires_at ? new Date(row.expires_at * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn';
+        return safeSend(chatId, `ℹ️ Key này <b>đã được kích hoạt trước đó</b>.\n\n🔑 Key: <code>${key}</code>\n📦 Gói: <b>${cfg.label}</b>\n⏰ Hạn: <b>${expStr}</b>`, { parse_mode: 'HTML' });
       }
-    }
+    } catch (e) { safeSend(msg.chat.id, 'Lỗi Server!'); }
   });
 }
 
