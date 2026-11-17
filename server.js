@@ -1,5 +1,5 @@
 /**
- * KAIRO TOOL - Backend Server (Fixed & Extended Edition)
+ * KAIRO TOOL - Backend Server (Fixed & Extended Edition + Device Lock)
  * Node.js / Express / PostgreSQL / Telegram Bot
  * Support: lc79, betvip, b52, hitclub, luckywin, sumclub
  */
@@ -90,7 +90,7 @@ const PRICES = {
 };
 
 // ============================================================
-// DATABASE
+// DATABASE (thêm cột device_id)
 // ============================================================
 const pool = DATABASE_URL
   ? new Pool({
@@ -111,7 +111,8 @@ async function initDB() {
         created_at DOUBLE PRECISION NOT NULL,
         activated_at DOUBLE PRECISION,
         expires_at DOUBLE PRECISION,
-        is_active INTEGER DEFAULT 0
+        is_active INTEGER DEFAULT 0,
+        device_id TEXT
       );
       CREATE TABLE IF NOT EXISTS orders (
         id TEXT PRIMARY KEY,
@@ -127,6 +128,9 @@ async function initDB() {
         key_issued TEXT
       );
     `);
+
+    // Migration: thêm cột nếu bảng đã tồn tại từ trước
+    await pool.query(`ALTER TABLE keys ADD COLUMN IF NOT EXISTS device_id TEXT`).catch(() => {});
 
     if (!DATABASE_URL && process.env.NODE_ENV !== 'production') {
       await pool.query(
@@ -341,6 +345,9 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/index.html', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/kho.html', (req, res) => res.sendFile(path.join(__dirname, 'kho.html')));
 
+// ============================================================
+// DEVICE LOCK MIDDLEWARE
+// ============================================================
 async function requireValidKey(req, res, next) {
   try {
     let rawKey = req.headers['x-kairo-key'];
@@ -350,8 +357,14 @@ async function requireValidKey(req, res, next) {
     const key = String(rawKey || '').trim().toUpperCase();
     if (!key) return res.status(401).json({ ok: false, error: 'Thiếu key xác thực' });
 
+    // Lấy device id từ header (frontend tự sinh & lưu localStorage)
+    const deviceId = String(req.headers['x-device-id'] || '').trim();
+    if (!deviceId) {
+      return res.status(400).json({ ok: false, error: 'Thiếu device id (x-device-id)' });
+    }
+
     const result = await pool.query(
-      'SELECT key, plan, duration_days, activated_at, expires_at, is_active FROM keys WHERE key = $1',
+      'SELECT key, plan, duration_days, activated_at, expires_at, is_active, device_id FROM keys WHERE key = $1',
       [key]
     );
     const row = result.rows[0];
@@ -362,6 +375,22 @@ async function requireValidKey(req, res, next) {
     if (row.expires_at != null && nowSec > row.expires_at) {
       return res.status(401).json({ ok: false, error: 'Key đã hết hạn' });
     }
+
+    // ===== KIỂM TRA THIẾT BỊ =====
+    if (row.device_id == null) {
+      // Gán thiết bị đầu tiên
+      await pool.query(
+        `UPDATE keys SET device_id = $1 WHERE key = $2 AND device_id IS NULL`,
+        [deviceId, key]
+      );
+      row.device_id = deviceId;
+    } else if (row.device_id !== deviceId) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Key đã được sử dụng trên thiết bị khác. Mỗi key chỉ dùng được 1 thiết bị.',
+      });
+    }
+
     req.keyRow = row;
     next();
   } catch (e) {
@@ -532,13 +561,22 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
   }
 });
 
+// ============================================================
+// API KÍCH HOẠT KEY (hỗ trợ device lock)
+// ============================================================
 app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
   try {
     const key = String(req.body?.key || '').trim().toUpperCase();
     if (!key) return res.status(400).json({ ok: false, error: 'Thiếu key' });
 
+    // Device ID bắt buộc khi kích hoạt từ web
+    const deviceId = String(req.body?.device_id || req.headers['x-device-id'] || '').trim();
+    if (!deviceId) {
+      return res.status(400).json({ ok: false, error: 'Thiếu device id' });
+    }
+
     const result = await pool.query(
-      'SELECT plan, duration_days, activated_at, expires_at FROM keys WHERE key = $1',
+      'SELECT plan, duration_days, activated_at, expires_at, device_id FROM keys WHERE key = $1',
       [key]
     );
     const row = result.rows[0];
@@ -549,9 +587,9 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
     if (row.activated_at == null) {
       const finalExp = row.duration_days == null ? null : nowSec + row.duration_days * 86400;
       const upd = await pool.query(
-        `UPDATE keys SET activated_at = $1, expires_at = $2, is_active = 1
-         WHERE key = $3 AND activated_at IS NULL`,
-        [nowSec, finalExp, key]
+        `UPDATE keys SET activated_at = $1, expires_at = $2, is_active = 1, device_id = $3
+         WHERE key = $4 AND activated_at IS NULL`,
+        [nowSec, finalExp, deviceId, key]
       );
       if (upd.rowCount === 0) {
         return res.json({ ok: false, error: 'Key vừa được kích hoạt bởi phiên khác' });
@@ -561,6 +599,18 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
         expires_at: finalExp,
         expires_str: finalExp ? new Date(finalExp * 1000).toLocaleString('vi-VN') : 'Vĩnh viễn',
       });
+    }
+
+    // Key đã kích hoạt trước đó → kiểm tra device
+    if (row.device_id && row.device_id !== deviceId) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Key đã được sử dụng trên thiết bị khác. Mỗi key chỉ dùng được 1 thiết bị.',
+      });
+    }
+    // Nếu key cũ chưa có device_id (do migrate) → gán luôn
+    if (!row.device_id) {
+      await pool.query(`UPDATE keys SET device_id = $1 WHERE key = $2 AND device_id IS NULL`, [deviceId, key]);
     }
 
     if (row.duration_days != null && row.expires_at && nowSec > row.expires_at) {
@@ -872,7 +922,8 @@ if (bot) {
           `✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n` +
           `🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n` +
           `📦 Gói: <b>${cfg.label}</b>\n\n` +
-          `⚠️ Key chỉ kích hoạt được 1 lần.\nNhập lại <b>KHÔNG cộng thêm</b> thời gian.`;
+          `⚠️ Key chỉ kích hoạt được 1 lần.\nNhập lại <b>KHÔNG cộng thêm</b> thời gian.\n` +
+          `📱 Mỗi key chỉ dùng được trên <b>1 thiết bị duy nhất</b>.`;
 
         if (hasCaption) safeEditCaption(chatId, msgId, successText, { parse_mode: 'HTML' });
         else safeEdit(chatId, msgId, successText, { parse_mode: 'HTML' });
@@ -986,7 +1037,7 @@ if (bot) {
         delete userState[userId];
         const key = msg.text.trim().toUpperCase();
         const res = await pool.query(
-          'SELECT plan, duration_days, activated_at, expires_at FROM keys WHERE key=$1',
+          'SELECT plan, duration_days, activated_at, expires_at, device_id FROM keys WHERE key=$1',
           [key]
         );
         const row = res.rows[0];
@@ -995,12 +1046,15 @@ if (bot) {
         const cfg = PRICES[row.plan] || { label: row.plan };
         const nowSec = Date.now() / 1000;
 
+        // Với bot, dùng telegram user ID làm device ID (không thay đổi luồng cũ)
+        const tgDeviceId = `tg:${userId}`;
+
         if (row.activated_at == null) {
           const exp = row.duration_days == null ? null : nowSec + row.duration_days * 86400;
           const upd = await pool.query(
-            `UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1
-             WHERE key=$3 AND activated_at IS NULL`,
-            [nowSec, exp, key]
+            `UPDATE keys SET activated_at=$1, expires_at=$2, is_active=1, device_id=$3
+             WHERE key=$4 AND activated_at IS NULL`,
+            [nowSec, exp, tgDeviceId, key]
           );
           if (upd.rowCount === 0) {
             return safeSend(chatId, '⚠️ Key vừa được kích hoạt bởi phiên khác, thử lại.');
@@ -1012,6 +1066,19 @@ if (bot) {
             `📦 Gói: <b>${cfg.label}</b>\n` +
             `⏰ Hạn dùng: <b>${expStr}</b>`,
             { parse_mode: 'HTML' });
+        }
+
+        // Key đã kích hoạt trước đó — kiểm tra device
+        if (row.device_id && row.device_id !== tgDeviceId) {
+          return safeSend(chatId,
+            `❌ Key đã được kích hoạt trên thiết bị khác.\nMỗi key chỉ dùng được trên 1 thiết bị duy nhất.`,
+            { parse_mode: 'HTML' });
+        }
+        if (!row.device_id) {
+          await pool.query(
+            `UPDATE keys SET device_id=$1 WHERE key=$2 AND device_id IS NULL`,
+            [tgDeviceId, key]
+          );
         }
 
         if (row.duration_days != null && row.expires_at && nowSec > row.expires_at) {
