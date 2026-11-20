@@ -38,6 +38,15 @@ const API_RETRY             = 1;
 const CIRCUIT_FAIL_THRESH   = 5;
 const CIRCUIT_OPEN_MS       = 30_000;
 
+// ── FIX #14: Brute-force protection cho /api/key/activate
+const ACTIVATE_FAIL_MAX     = 20;
+const ACTIVATE_LOCK_MS      = 15 * 60_000;
+const ACTIVATE_FAILS        = new Map(); // ip -> {count, lockUntil}
+
+// ── FIX #5: Cache predict 3s/game để giảm spam API bên thứ 3
+const PREDICT_CACHE_MS      = 3_000;
+const PREDICT_CACHE         = new Map(); // gameId -> {data, at}
+
 // ============================================================
 // GAME API MAP & PRICES
 // ============================================================
@@ -106,14 +115,18 @@ async function initDB() {
     console.log('✅ Database Ready!');
   } catch (err) {
     console.error('❌ DB Error:', err.message);
+    // FIX #10: ném lỗi để chặn app.listen nếu DB không init được
+    throw err;
   }
 }
-initDB();
+// FIX #10: bỏ initDB() gọi rời — chuyển xuống cuối file, chờ xong mới listen
+// initDB();
 
 // ============================================================
 // UTILS & TOKENS
 // ============================================================
-function predictSicbo(history) {
+// ── FIX #3: predictSicbo deterministic theo gameNum (không dùng randomInt)
+function predictSicbo(history, gameNum = '') {
   if (!Array.isArray(history) || history.length < 3) return { du_doan: 'TÀI', tin_cay: 55 };
   const recent = history.slice(0, 15).map(h => Number(h.resultType)).filter(v => v === 0 || v === 1).reverse();
   if (recent.length < 3) return { du_doan: 'TÀI', tin_cay: 55 };
@@ -131,7 +144,12 @@ function predictSicbo(history) {
     else if (c === d && a === b && a !== c) { predict = a === 1 ? 'XỈU' : 'TÀI'; confidence = 60; }
   }
   if (!predict) {
-    if (taiCount === xiuCount) { predict = crypto.randomInt(0, 2) === 1 ? 'TÀI' : 'XỈU'; confidence = 50; }
+    if (taiCount === xiuCount) {
+      // FIX #3: thay crypto.randomInt bằng hash deterministic theo gameNum
+      const h = crypto.createHash('sha256').update(String(gameNum || recent.join(''))).digest();
+      predict = (h[0] & 1) === 1 ? 'TÀI' : 'XỈU';
+      confidence = 50;
+    }
     else { predict = taiCount > xiuCount ? 'TÀI' : 'XỈU'; confidence = 50 + Math.abs(taiCount - xiuCount) * 2; }
   }
   return { du_doan: predict, tin_cay: Math.min(85, Math.max(50, Math.round(confidence))) };
@@ -157,7 +175,8 @@ function gameToToken(game) { for (const [t, g] of Object.entries(TOKEN_MAP)) { i
 rebuildTokenMap();
 
 const RATE_BUCKETS = new Map();
-function clientIp(req) { return (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim(); }
+// ── FIX #6: dùng req.ip (đã trust proxy), KHÔNG tin x-forwarded-for thô
+function clientIp(req) { return req.ip || req.socket.remoteAddress || 'unknown'; }
 function rateLimit(max = RATE_LIMIT_MAX, windowMs = RATE_LIMIT_WINDOW_MS) {
   return (req, res, next) => {
     const ip = clientIp(req); const now = Date.now();
@@ -239,13 +258,21 @@ app.get('/api/games', rateLimit(), requireValidKey, (req, res) => {
     const t = gameToToken(k);
     if (t) games.push({ id: k, token: t, ...m });
   }
-  res.json({ games });
+  // FIX #2: trả thêm rotate_at để client biết khi nào token hết hạn
+  const rotateAt = (hourBucket() + 1) * TOKEN_ROTATE_MS;
+  res.json({ games, rotate_at: rotateAt });
 });
 
 app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) => {
   rebuildTokenMap();
   const gameId = tokenToGame(req.params.token);
   if (!gameId) return res.status(403).json({ error: 'Token không hợp lệ' });
+
+  // FIX #5: cache 3s/game
+  const cached = PREDICT_CACHE.get(gameId);
+  if (cached && Date.now() - cached.at < PREDICT_CACHE_MS) {
+    return res.json(cached.data);
+  }
 
   try {
     const r = await axios.get(API_GAME_RAW[gameId], { timeout: API_TIMEOUT_MS });
@@ -265,9 +292,12 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
     } else {
       const history = Array.isArray(raw) ? raw : (raw.data || []);
       if (!history.length) throw new Error('Rỗng');
-      const pred = predictSicbo(history);
-      data = { phien: String(history[0].gameNum), du_doan: pred.du_doan, tin_cay: pred.tin_cay, history };
+      // FIX #3: lấy phien để truyền vào predictSicbo
+      const phien = String(history[0].gameNum || '');
+      const pred = predictSicbo(history, phien);
+      data = { phien, du_doan: pred.du_doan, tin_cay: pred.tin_cay, history };
     }
+    PREDICT_CACHE.set(gameId, { data, at: Date.now() });
     res.json(data);
   } catch (e) {
     res.json({ du_doan: 'BẢO TRÌ', tin_cay: 0, history: [] });
@@ -276,6 +306,14 @@ app.get('/api/predict/:token', rateLimit(), requireValidKey, async (req, res) =>
 
 app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
   try {
+    const ip = clientIp(req);
+
+    // FIX #14: lock IP sau nhiều lần fail
+    const fail = ACTIVATE_FAILS.get(ip);
+    if (fail && fail.lockUntil && Date.now() < fail.lockUntil) {
+      return res.status(429).json({ ok: false, error: 'Quá nhiều lần thử sai. Vui lòng đợi 15 phút.' });
+    }
+
     const key = String(req.body?.key || '').trim().toUpperCase();
     const deviceId = String(req.body?.device_id || req.headers['x-device-id'] || '').trim();
     
@@ -284,7 +322,14 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
 
     const result = await pool.query('SELECT * FROM keys WHERE key = $1', [key]);
     const row = result.rows[0];
-    if (!row) return res.json({ ok: false, error: 'Key không tồn tại' });
+    if (!row) {
+      // FIX #14: tăng đếm fail
+      const rec = ACTIVATE_FAILS.get(ip) || { count: 0, lockUntil: 0 };
+      rec.count++;
+      if (rec.count >= ACTIVATE_FAIL_MAX) rec.lockUntil = Date.now() + ACTIVATE_LOCK_MS;
+      ACTIVATE_FAILS.set(ip, rec);
+      return res.json({ ok: false, error: 'Key không tồn tại' });
+    }
 
     const nowSec = Date.now() / 1000;
 
@@ -295,6 +340,7 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
         [nowSec, finalExp, deviceId, key]
       );
       if (upd.rowCount === 0) return res.json({ ok: false, error: 'Key đang bị thao tác' });
+      ACTIVATE_FAILS.delete(ip);
       return res.json({ ok: true, first_time: true, message: 'Kích hoạt thành công' });
     }
 
@@ -305,6 +351,7 @@ app.post('/api/key/activate', rateLimit(10, 60_000), async (req, res) => {
     if (row.duration_days != null && row.expires_at && nowSec > row.expires_at) {
       return res.json({ ok: false, error: 'Key đã hết hạn' });
     }
+    ACTIVATE_FAILS.delete(ip);
     return res.json({ ok: true, first_time: false, message: 'Kích hoạt thành công' });
   } catch (e) {
     res.status(500).json({ ok: false, error: 'Lỗi server' });
@@ -337,7 +384,8 @@ if (BOT_TOKEN) {
 const userState = {};
 function genKey(plan) {
   const pref = { '1d': 'HT1D', '4d': 'HT4D', '1w': 'HT1W', '1m': 'HT1M', '3m': 'HT3M', 'life': 'HTLIFE' }[plan] || 'HTX';
-  return `${pref}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  // FIX #15: tăng entropy 8 bytes (16 hex ký tự) thay vì 4 bytes
+  return `${pref}-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
 }
 function isAdmin(user) {
   if (!user) return false;
@@ -452,7 +500,11 @@ if (bot) {
       }
       else if (data.startsWith('paid_')) {
         const orderId = data.replace('paid_', '');
-        const claim = await pool.query(`UPDATE orders SET status='processing' WHERE id=$1 AND status='pending' RETURNING plan, amount, content`, [orderId]).catch(() => ({ rowCount: 0, rows: [] }));
+        // FIX #7: kiểm tra order thuộc về user hiện tại (chống claim trộm order)
+        const claim = await pool.query(
+          `UPDATE orders SET status='processing' WHERE id=$1 AND status='pending' AND user_id=$2 RETURNING plan, amount, content`,
+          [orderId, user.id]
+        ).catch(() => ({ rowCount: 0, rows: [] }));
         if (claim.rowCount === 0) return answer('Đơn không tồn tại hoặc đã xử lý', true);
 
         const order = claim.rows[0];
@@ -482,8 +534,14 @@ if (bot) {
         const key = genKey(order.plan);
         const cfg = PRICES[order.plan];
 
-        await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4', ['paid', Date.now() / 1000, key, orderId]).catch(() => {});
-        await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, order.plan, cfg.days, Date.now() / 1000]).catch(() => {});
+        // FIX #1: nếu INSERT key fail → rollback order về pending để user thử lại
+        try {
+          await pool.query('UPDATE orders SET status=$1, paid_at=$2, key_issued=$3 WHERE id=$4', ['paid', Date.now() / 1000, key, orderId]);
+          await pool.query('INSERT INTO keys (key, plan, duration_days, created_at, is_active) VALUES ($1,$2,$3,$4,0)', [key, order.plan, cfg.days, Date.now() / 1000]);
+        } catch (e) {
+          await pool.query('UPDATE orders SET status=$1 WHERE id=$2', ['pending', orderId]).catch(() => {});
+          return answer('Lỗi tạo key, vui lòng thử lại', true);
+        }
 
         const successText = `✅ <b>THANH TOÁN THÀNH CÔNG!</b>\n\n🔑 <b>KEY CỦA BẠN:</b>\n<code>${key}</code>\n\n📦 Gói: <b>${cfg.label}</b>\n\n⚠️ Key chỉ kích hoạt được 1 lần.\n📱 Mỗi key chỉ dùng được trên <b>1 thiết bị duy nhất</b>.`;
         if (hasCaption) safeEditCaption(chatId, msgId, successText, { parse_mode: 'HTML' });
@@ -538,7 +596,8 @@ if (bot) {
       else if (data.startsWith('resetkey_') && isAdmin(user)) {
         const key = data.replace('resetkey_', '');
         await pool.query('UPDATE keys SET device_id = NULL WHERE key = $1', [key]).catch(() => {});
-        safeEdit(chatId, msgId, `✅ Đã <b>Reset Thiết Bị</b> cho key <code>${key}</code>.\n\nKhách hàng có thể đăng nhập trên máy mới.`, {
+        // FIX #4: ghi rõ chỉ reset thiết bị, không gia hạn
+        safeEdit(chatId, msgId, `✅ Đã <b>Reset Thiết Bị</b> cho key <code>${key}</code>.\n\nKhách hàng có thể đăng nhập trên máy mới.\n⚠️ Lưu ý: chỉ reset thiết bị, <b>không gia hạn</b> thời gian sử dụng.`, {
           parse_mode: 'HTML',
           reply_markup: { inline_keyboard: [[{ text: '🔙 Danh sách', callback_data: 'keylist_0' }]] },
         });
@@ -604,4 +663,14 @@ if (bot) {
   });
 }
 
-app.listen(PORT, '0.0.0.0', () => { console.log(`🌐 Web Server running on port ${PORT}`); });
+// ============================================================
+// FIX #10: chờ initDB xong mới listen
+// ============================================================
+initDB()
+  .then(() => {
+    app.listen(PORT, '0.0.0.0', () => { console.log(`🌐 Web Server running on port ${PORT}`); });
+  })
+  .catch(err => {
+    console.error('❌ Không thể khởi động server vì lỗi DB:', err.message);
+    process.exit(1);
+  });
